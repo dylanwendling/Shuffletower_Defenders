@@ -19,7 +19,7 @@ PINK, SLIME = (255, 105, 180), (100, 255, 100)
 
 pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Spire Defense: Tutorial & Animated Menu")
+pygame.display.set_caption("Spire Defense: Lethal Bosses & Interactive Tutorial")
 clock = pygame.time.Clock()
 font = pygame.font.SysFont("Arial", 16, bold=True)
 large_font = pygame.font.SysFont("Arial", 32, bold=True)
@@ -106,27 +106,32 @@ class MapNode:
 class GameState:
     def __init__(self):
         self.setup_menu()
+        
+        self.tutorial_messages = [
+            "NARRATOR: Welcome to Spire Defense! I'll be your guide. (Press SPACE to continue)",
+            "NARRATOR: Your Base is at the end of the dirt path. If enemies touch it, you lose HP.",
+            "NARRATOR: Drag cards from your hand onto the green grass to build defensive towers.",
+            "NARRATOR: Cards cost Energy (bottom left). You start with 3 Energy per turn.",
+            "NARRATOR: Enemies vary! Normal (Brown), Swarms (Green), Tanks (Gray)...",
+            "NARRATOR: ...and Flyers (Pink) that ignore walls! Bosses (Purple) mean INSTANT death.",
+            "NARRATOR: Build your defenses, then click 'Start Wave' to begin. Good luck!"
+        ]
+        self.tutorial_index = 0
 
     def setup_menu(self):
-        self.mode = "MENU"
-        self.paused = False
-        self.tutorial_active = False
-        # Animated menu background components
+        self.mode, self.paused, self.tutorial_active = "MENU", False, False
         cards = get_all_cards()
         self.towers = [Tower(2, 4, cards[0]), Tower(5, 3, cards[1]), Tower(8, 4, cards[2]), Tower(10, 4, cards[0])]
-        self.walls = {(7, 5): Wall(7, 5, 9999)} # Indestructible menu wall
-        self.enemies, self.lasers, self.explosions = [], [], []
-        self.spawn_timer = 0
-        
-        # Core game data
+        self.walls = {(7, 5): Wall(7, 5, 9999)}
+        self.enemies, self.lasers, self.explosions, self.spawn_timer = [], [], [], 0
         self.master_deck, self.passives, self.map_tiers = [], [], []
         self.base_max_hp, self.gold, self.base_hp = 100, 50, 100
         self.current_node, self.available_next_nodes = None, []
         self.draw_pile, self.discard_pile, self.hand = [], [], []
         self.max_energy, self.energy = 3, 3
         self.wave, self.max_waves, self.battle_phase = 1, 3, "PLANNING"
-        self.enemies_to_spawn = []
-        self.shop_cards, self.shop_passive, self.shop_refresh_cost = [], None, 10
+        self.enemies_to_spawn, self.shop_cards, self.shop_passive = [], [], None
+        self.shop_refresh_cost = 10
         self.reward_choices, self.elite_passive_choices = [], []
         self.reward_card_picked, self.reward_passive_picked = False, False
         self.dragging_card, self.mouse_pos = None, (0,0)
@@ -190,6 +195,7 @@ class GameState:
         self.towers.clear(); self.walls.clear(); self.enemies.clear(); self.explosions.clear()
         self.wave, self.max_waves = 1, (4 if encounter_type == 'ELITE' else 3)
         self.tutorial_active = (encounter_type == 'TUTORIAL')
+        self.tutorial_index = 0 # Reset tutorial dialogue
         self.draw_pile = [c.clone() for c in self.master_deck]
         random.shuffle(self.draw_pile)
         self.discard_pile.clear(); self.hand.clear()
@@ -207,7 +213,6 @@ class GameState:
         self.discard_pile.extend(self.hand); self.hand.clear(); self.draw_cards(5)
         self.enemies_to_spawn = []
         
-        # Difficulty Scaling
         if self.tutorial_active:
             hp_scale = 0.5
             if self.wave == 1: self.enemies_to_spawn = [Enemy("NORMAL", hp_scale) for _ in range(3)]
@@ -253,7 +258,6 @@ class GameState:
         return True
 
     def _simulate_entities(self, is_menu=False):
-        """Shared logic for moving enemies and firing towers for both Battle and Menu"""
         for e in self.enemies[:]:
             blocked = False
             if not e.flying and e.path_index < len(PATH) - 1:
@@ -280,9 +284,19 @@ class GameState:
                 self.enemies.remove(e)
             elif reached_end:
                 if not is_menu:
-                    self.base_hp -= (15 if e.type in ['BOSS', 'ELITE'] else 5)
-                    if self.base_hp <= 0: self.mode = "GAMEOVER"
-                self.enemies.remove(e)
+                    # NEW MECHANIC: Boss Instant Kill & Elite Double Damage
+                    if e.type == 'BOSS':
+                        self.base_hp = 0
+                        self.mode = "GAMEOVER"
+                    else:
+                        dmg = 15 if e.type == 'ELITE' else 5
+                        if self.current_node and self.current_node.type == 'ELITE':
+                            dmg *= 2 # Double damage during Elite encounters!
+                        
+                        self.base_hp -= dmg
+                        if self.base_hp <= 0: self.mode = "GAMEOVER"
+                        
+                if e in self.enemies: self.enemies.remove(e)
         
         self.lasers.clear()
         bonus_dmg = 5 if "DMG_1" in self.passives and not is_menu else 0
@@ -434,17 +448,20 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT: running = False
         
-        # KEYBOARD EVENTS (PAUSE)
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE and game.mode in ["BATTLE", "MAP"]:
                 game.paused = not game.paused
+            
+            # Interactive Tutorial SPACEBAR logic
+            if event.key == pygame.K_SPACE and game.mode == "BATTLE" and game.tutorial_active:
+                if game.tutorial_index < len(game.tutorial_messages) - 1:
+                    game.tutorial_index += 1
 
-        # MOUSE EVENTS
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if game.paused:
-                if WIDTH//2 - 100 <= mx <= WIDTH//2 + 100 and HEIGHT//2 - 30 <= my <= HEIGHT//2 + 20: game.paused = False # Resume
-                if WIDTH//2 - 100 <= mx <= WIDTH//2 + 100 and HEIGHT//2 + 40 <= my <= HEIGHT//2 + 90: game.setup_menu() # Quit to menu
-                continue # Skip other clicks while paused
+                if WIDTH//2 - 100 <= mx <= WIDTH//2 + 100 and HEIGHT//2 - 30 <= my <= HEIGHT//2 + 20: game.paused = False
+                if WIDTH//2 - 100 <= mx <= WIDTH//2 + 100 and HEIGHT//2 + 40 <= my <= HEIGHT//2 + 90: game.setup_menu()
+                continue
 
             if game.mode == "MENU": game.start_run()
             elif game.mode == "MAP":
@@ -512,7 +529,6 @@ while running:
 
     if game.mode == "MENU":
         draw_grid_and_entities(screen, game)
-        # Dark Overlay for Menu text
         overlay = pygame.Surface((WIDTH, HEIGHT)); overlay.set_alpha(150); overlay.fill(BLACK); screen.blit(overlay, (0,0))
         draw_text(screen, "SPIRE DEFENSE", pygame.font.SysFont("Arial", 60, bold=True), GOLD, WIDTH//2, HEIGHT//3, center=True)
         draw_text(screen, "Click anywhere to start", large_font, WHITE, WIDTH//2, HEIGHT//2, center=True)
@@ -543,14 +559,11 @@ while running:
         draw_text(screen, f"Energy: {game.energy}/{game.max_energy}", large_font, BLUE, 20, HEIGHT - 180)
         draw_passives(screen, game, mx, my)
 
-        # NARRATOR TUTORIAL
+        # INTERACTIVE TUTORIAL DIALOGUE
         if game.tutorial_active:
-            pygame.draw.rect(screen, DARK_GRAY, (WIDTH//2 - 350, 20, 700, 60), border_radius=10)
-            pygame.draw.rect(screen, GOLD, (WIDTH//2 - 350, 20, 700, 60), 2, border_radius=10)
-            draw_text(screen, "NARRATOR:", font, GOLD, WIDTH//2 - 330, 30)
-            if game.battle_phase == "PLANNING": msg = "Drag cards from your hand to the green grass to build defenses. Click 'Start Wave' when ready!"
-            else: msg = "Watch your towers defend the base! Enemies follow the dirt path. If they reach the end, you lose HP."
-            draw_text(screen, msg, font, WHITE, WIDTH//2 - 330, 50)
+            pygame.draw.rect(screen, DARK_GRAY, (WIDTH//2 - 380, 20, 760, 60), border_radius=10)
+            pygame.draw.rect(screen, GOLD, (WIDTH//2 - 380, 20, 760, 60), 2, border_radius=10)
+            draw_text(screen, game.tutorial_messages[game.tutorial_index], font, WHITE, WIDTH//2, 50, center=True)
 
         if game.battle_phase == "PLANNING":
             pygame.draw.rect(screen, GREEN, (WIDTH-150, 20, 130, 40), border_radius=5)
@@ -584,8 +597,14 @@ while running:
 
     elif game.mode == "SHOP":
         draw_text(screen, f"SHOP - Gold: {game.gold}", large_font, GOLD, WIDTH//2, 100, center=True)
+        
         for i, card in enumerate(game.shop_cards):
-            if card: draw_card(screen, card, 150 + i * 150, 300, (150+i*150 <= mx <= 150+i*150+120 and 300 <= my <= 460))
+            if card: 
+                cx, cy = 150 + i * 150, 300
+                # NEW SHOP UI PRICING
+                draw_text(screen, "Cost: 50g", font, GOLD, cx+25, cy-25) 
+                draw_card(screen, card, cx, cy, (cx <= mx <= cx+120 and cy <= my <= cy+160))
+                
         if game.shop_passive: draw_item_box(screen, game.shop_passive.name, game.shop_passive.description, game.shop_passive.cost, 650, 300, 200, 80, 650 <= mx <= 850 and 300 <= my <= 380)
         pygame.draw.rect(screen, BLUE if 400 <= mx <= 600 and 520 <= my <= 570 else DARK_GRAY, (400, 520, 200, 50), border_radius=5)
         draw_text(screen, f"Refresh Shop ({game.shop_refresh_cost}g)", font, WHITE, 500, 545, center=True)
@@ -624,7 +643,6 @@ while running:
         draw_text(screen, "GAME OVER" if game.mode == "GAMEOVER" else "YOU DEFENDED THE SPIRE!", large_font, RED if game.mode == "GAMEOVER" else GREEN, WIDTH//2, HEIGHT//2, center=True)
         draw_text(screen, "Click to restart", font, WHITE, WIDTH//2, HEIGHT//2 + 50, center=True)
 
-    # --- PAUSE OVERLAY ---
     if game.paused:
         overlay = pygame.Surface((WIDTH, HEIGHT)); overlay.set_alpha(180); overlay.fill(BLACK); screen.blit(overlay, (0,0))
         draw_text(screen, "PAUSED", pygame.font.SysFont("Arial", 50, bold=True), WHITE, WIDTH//2, HEIGHT//3, center=True)
