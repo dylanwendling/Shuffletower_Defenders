@@ -2,6 +2,7 @@ import pygame
 import random
 import math
 import sys
+import os
 
 # --- CONFIGURATION & CONSTANTS ---
 WIDTH, HEIGHT = 1000, 700
@@ -18,8 +19,9 @@ PURPLE, CYAN, ORANGE = (150, 50, 200), (50, 200, 200), (255, 140, 0)
 PINK, SLIME = (255, 105, 180), (100, 255, 100)
 
 pygame.init()
+pygame.mixer.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Spire Defense: Endless Mode & Increased Rests")
+pygame.display.set_caption("Spire Defense")
 clock = pygame.time.Clock()
 font = pygame.font.SysFont("Arial", 16, bold=True)
 large_font = pygame.font.SysFont("Arial", 32, bold=True)
@@ -27,6 +29,57 @@ large_font = pygame.font.SysFont("Arial", 32, bold=True)
 PATH = [(0,2), (1,2), (2,2), (3,2), (3,3), (3,4), (3,5), (4,5), (5,5), 
         (6,5), (7,5), (7,4), (7,3), (8,3), (9,3), (10,3), (11,3), (12,3), 
         (12,4), (12,5), (12,6), (12,7), (13,7), (14,7), (15,7)]
+
+# --- AUDIO MANAGER ---
+
+class AudioManager:
+    def __init__(self):
+        self.current_bgm = None
+        self.sounds = {}
+        
+        self.bgm_files = {
+            "MAIN": "bgm_main.ogg",
+            "BATTLE": "bgm_battle.ogg",
+            "SHOP_REST": "bgm_shop_rest.ogg",
+            "ELITE_BOSS": "bgm_elite_boss.ogg"
+        }
+        
+        sfx_files = {
+            "click": "sfx_click.ogg",
+            "draw": "sfx_card_draw.ogg",
+            "play": "sfx_card_play.ogg",
+            "shoot": "sfx_tower_shoot.ogg",
+            "explode": "sfx_explode.ogg",
+            "death": "sfx_death.ogg",
+            "base_hit": "sfx_base_hit.ogg",
+            "win": "sfx_win.ogg",
+            "gameover": "sfx_gameover.ogg"
+        }
+        
+        for name, path in sfx_files.items():
+            if os.path.exists(path):
+                self.sounds[name] = pygame.mixer.Sound(path)
+                self.sounds[name].set_volume(0.5)
+            else:
+                self.sounds[name] = None
+
+    def play_bgm(self, track_key):
+        if self.current_bgm == track_key: return
+        self.current_bgm = track_key
+        try:
+            pygame.mixer.music.load(self.bgm_files[track_key])
+            pygame.mixer.music.set_volume(0.4)
+            pygame.mixer.music.play(-1)
+        except pygame.error:
+            pass
+
+    def stop_bgm(self):
+        pygame.mixer.music.stop()
+        self.current_bgm = None
+
+    def play_sfx(self, sound_key):
+        if sound_key in self.sounds and self.sounds[sound_key]:
+            self.sounds[sound_key].play()
 
 # --- DATA CLASSES ---
 
@@ -58,17 +111,11 @@ class CardTemplate:
             elif self.type == "WALL": self.hp += int(self.base_hp * 0.5)
             elif self.type == "SKILL":
                 if "Repair" in self.name:
-                    self.energy_gain += 1
-                    self.cost = 0 
-                    self.description = "Heals base by 15 HP. Gain 1 Energy."
+                    self.energy_gain += 1; self.cost = 0; self.description = "Heals base by 15 HP. Gain 1 Energy."
                 elif "Quick Thinking" in self.name:
-                    self.draw_amount = 2
-                    self.energy_gain = 2
-                    self.description = "Draw 2. Gain 2 Energy."
-                elif "Brainstorm" in self.name:
-                    self.cost = 0
-                else:
-                    self.cost = max(0, self.cost - 1)
+                    self.draw_amount = 2; self.energy_gain = 2; self.description = "Draw 2. Gain 2 Energy."
+                elif "Brainstorm" in self.name: self.cost = 0
+                else: self.cost = max(0, self.cost - 1)
 
 def get_all_cards():
     return [
@@ -82,8 +129,7 @@ def get_all_cards():
     ]
 
 class Passive:
-    def __init__(self, id, name, cost, description):
-        self.id, self.name, self.cost, self.description = id, name, cost, description
+    def __init__(self, id, name, cost, description): self.id, self.name, self.cost, self.description = id, name, cost, description
 
 PASSIVE_DB = {
     "ENG_1": Passive("ENG_1", "Energy Crystal", 100, "Start battles with +1 Max Energy."),
@@ -116,13 +162,13 @@ class Tower:
         self.x, self.y = MAP_OFFSET_X + gx * GRID_SIZE + GRID_SIZE//2, MAP_OFFSET_Y + gy * GRID_SIZE + GRID_SIZE//2
 
 class MapNode:
-    def __init__(self, x, y, type, tier):
-        self.x, self.y, self.type, self.tier, self.connections = x, y, type, tier, []
+    def __init__(self, x, y, type, tier): self.x, self.y, self.type, self.tier, self.connections = x, y, type, tier, []
 
 # --- MAIN GAME STATE ---
 
 class GameState:
     def __init__(self):
+        self.audio = AudioManager()
         self.setup_menu()
         
         self.tutorial_messages = [
@@ -138,9 +184,9 @@ class GameState:
 
     def setup_menu(self):
         self.mode, self.paused, self.tutorial_active = "MENU", False, False
-        self.is_endless = False
-        self.loop_count = 0
-        self.beat_boss_in_endless = False
+        self.is_endless, self.loop_count, self.beat_boss_in_endless = False, 0, False
+        
+        self.audio.play_bgm("MAIN")
         
         cards = get_all_cards()
         self.towers = [Tower(2, 4, cards[0]), Tower(5, 3, cards[1]), Tower(8, 4, cards[2]), Tower(10, 4, cards[0])]
@@ -170,13 +216,9 @@ class GameState:
             for n in range(num_nodes):
                 x = WIDTH // 2 + (n - (num_nodes-1)/2) * 120 + random.randint(-15, 15)
                 y = HEIGHT - 100 - t * 100
-                if self.loop_count == 0 and t == 0:
-                    type = 'TUTORIAL'
-                elif t == 0:
-                    type = 'BATTLE'
-                else:
-                    # INCREASED WEIGHTS FOR SHOP AND CAMPFIRE
-                    type = random.choices(['BATTLE', 'ELITE', 'SHOP', 'CAMPFIRE'], weights=[35, 15, 25, 25])[0]
+                if self.loop_count == 0 and t == 0: type = 'TUTORIAL'
+                elif t == 0: type = 'BATTLE'
+                else: type = random.choices(['BATTLE', 'ELITE', 'SHOP', 'CAMPFIRE'], weights=[35, 15, 25, 25])[0]
                 tier_nodes.append(MapNode(x, y, type, t))
             self.map_tiers.append(tier_nodes)
         self.map_tiers.append([MapNode(WIDTH//2, 80, 'BOSS', 5)])
@@ -203,15 +245,18 @@ class GameState:
         self.current_node = node
         self.available_next_nodes = node.connections
         if node.type in ['BATTLE', 'TUTORIAL', 'ELITE', 'BOSS']: self.enter_battle(node.type)
-        elif node.type == 'SHOP': self.shop_refresh_cost = 10; self.refresh_shop_items(); self.mode = "SHOP"
+        elif node.type == 'SHOP': 
+            self.shop_refresh_cost = 10; self.refresh_shop_items(); self.mode = "SHOP"
+            self.audio.play_bgm("SHOP_REST")
+        elif node.type == 'CAMPFIRE':
+            self.mode = "CAMPFIRE"
+            self.audio.play_bgm("SHOP_REST")
         else: self.mode = node.type
 
     def refresh_shop_items(self):
-        self.shop_cards = []
-        for c in random.sample(get_all_cards(), 3):
-            clone = c.clone(); 
-            if random.random() < 0.25: clone.upgrade()
-            self.shop_cards.append(clone)
+        self.shop_cards = [c.clone() for c in random.sample(get_all_cards(), 3)]
+        for c in self.shop_cards:
+            if random.random() < 0.25: c.upgrade()
         avail = [p for p in get_all_passives() if p.id not in self.passives]
         self.shop_passive = random.choice(avail) if avail else None
 
@@ -221,6 +266,9 @@ class GameState:
         elif passive_id == "ENG_1": self.max_energy += 1
 
     def enter_battle(self, encounter_type):
+        if encounter_type in ['ELITE', 'BOSS']: self.audio.play_bgm("ELITE_BOSS")
+        else: self.audio.play_bgm("BATTLE")
+        
         self.towers.clear(); self.walls.clear(); self.enemies.clear(); self.explosions.clear()
         self.wave, self.max_waves = 1, (4 if encounter_type == 'ELITE' else 3)
         self.tutorial_active = (encounter_type == 'TUTORIAL' and self.loop_count == 0)
@@ -235,7 +283,9 @@ class GameState:
         for _ in range(amount):
             if not self.draw_pile:
                 self.draw_pile = list(self.discard_pile); random.shuffle(self.draw_pile); self.discard_pile.clear()
-            if self.draw_pile: self.hand.append(self.draw_pile.pop(0))
+            if self.draw_pile: 
+                self.hand.append(self.draw_pile.pop(0))
+                self.audio.play_sfx("draw")
 
     def start_turn(self):
         self.battle_phase, self.energy = "PLANNING", self.max_energy
@@ -249,7 +299,6 @@ class GameState:
             else: self.enemies_to_spawn = [Enemy("TANK", hp_scale)] + [Enemy("NORMAL", hp_scale) for _ in range(2)]
             return
 
-        # ENDLESS MODE SCALING applied here
         hp_scale = 0.8 + (self.current_node.tier * 0.25) + (self.loop_count * 2.0)
         count = 3 + self.wave * 2 + (self.current_node.tier) + (self.loop_count * 2)
 
@@ -258,9 +307,7 @@ class GameState:
         if self.current_node.type == 'BOSS':
             if self.wave == 3:
                 self.enemies_to_spawn.append(Enemy("BOSS", hp_scale))
-                for _ in range(count):
-                    etype = random.choices(["SWARM", "TANK", "FLYING"], weights=[30, 40, 30])[0]
-                    self.enemies_to_spawn.append(Enemy(etype, hp_scale))
+                for _ in range(count): self.enemies_to_spawn.append(Enemy(random.choices(["SWARM", "TANK", "FLYING"], weights=[30, 40, 30])[0], hp_scale))
             else:
                 for _ in range(count):
                     etype = random.choices(["SWARM", "TANK", "FLYING"], weights=[40, 30, 30])[0]
@@ -286,7 +333,6 @@ class GameState:
 
     def play_card(self, card, gx, gy):
         if self.energy < card.cost: return False
-        
         if card.type == "TOWER":
             if (gx, gy) in PATH or any(t.gx == gx and t.gy == gy for t in self.towers): return False
             self.towers.append(Tower(gx, gy, card))
@@ -298,13 +344,13 @@ class GameState:
                 
         self.energy -= card.cost
         self.hand.remove(card)
+        self.audio.play_sfx("play")
         
         if card.draw_amount > 0: self.draw_cards(card.draw_amount)
         if card.energy_gain > 0: self.energy += card.energy_gain
         
         if card.exhaust: self.exhaust_pile.append(card)
         else: self.discard_pile.append(card)
-        
         return True
 
     def _simulate_entities(self, is_menu=False):
@@ -330,17 +376,25 @@ class GameState:
                 else: reached_end = True
 
             if e.hp <= 0:
-                if not is_menu: self.gold += e.reward
+                if not is_menu: 
+                    self.gold += e.reward
+                    self.audio.play_sfx("death")
                 self.enemies.remove(e)
             elif reached_end:
                 if not is_menu:
                     if e.type == 'BOSS':
                         self.base_hp = 0; self.mode = "GAMEOVER"
+                        self.audio.stop_bgm()
+                        self.audio.play_sfx("gameover")
                     else:
                         dmg = 15 if e.type == 'ELITE' else 5
                         if self.current_node and self.current_node.type in ['ELITE', 'BOSS']: dmg *= 2 
                         self.base_hp -= dmg
-                        if self.base_hp <= 0: self.mode = "GAMEOVER"
+                        self.audio.play_sfx("base_hit")
+                        if self.base_hp <= 0: 
+                            self.mode = "GAMEOVER"
+                            self.audio.stop_bgm()
+                            self.audio.play_sfx("gameover")
                         
                 if e in self.enemies: self.enemies.remove(e)
         
@@ -354,17 +408,21 @@ class GameState:
                     target = in_range[0]
                     total_dmg = t.template.damage + bonus_dmg
                     if t.template.aoe_radius > 0:
+                        self.audio.play_sfx("explode")
                         self.explosions.append([target.x, target.y, t.template.aoe_radius, 15])
                         for splash_target in self.enemies:
                             if math.hypot(splash_target.x - target.x, splash_target.y - target.y) <= t.template.aoe_radius:
                                 splash_target.hp -= total_dmg
                     else:
                         target.hp -= total_dmg; self.lasers.append((t.x, t.y, target.x, target.y))
+                        if not is_menu: self.audio.play_sfx("shoot")
                     t.cooldown = t.template.fire_rate
                     
         for e in self.enemies[:]:
             if e.hp <= 0:
-                if not is_menu: self.gold += e.reward
+                if not is_menu: 
+                    self.gold += e.reward
+                    self.audio.play_sfx("death")
                 if e in self.enemies: self.enemies.remove(e)
 
     def update_menu(self):
@@ -395,20 +453,25 @@ class GameState:
             if not self.enemies and not self.enemies_to_spawn:
                 if self.wave >= self.max_waves:
                     if "GOLD_1" in self.passives: self.gold += 20
+                    self.audio.play_sfx("win")
                     
                     if self.current_node.type == 'BOSS':
                         if self.is_endless:
                             self.beat_boss_in_endless = True
                             self.generate_elite_rewards()
                             self.mode = "ELITE_REWARD"
+                            self.audio.play_bgm("SHOP_REST")
                         else:
                             self.mode = "WIN"
+                            self.audio.stop_bgm()
                     elif self.current_node.type == 'ELITE':
                         self.generate_elite_rewards()
                         self.mode = "ELITE_REWARD"
+                        self.audio.play_bgm("SHOP_REST")
                     else:
                         self.reward_choices = random.sample(get_all_cards(), 3)
                         self.mode = "REWARD"
+                        self.audio.play_bgm("SHOP_REST")
                 else:
                     self.wave += 1; self.start_turn()
 
@@ -511,9 +574,11 @@ while running:
             if event.key == pygame.K_SPACE and game.mode == "BATTLE" and game.tutorial_active:
                 if game.tutorial_index < len(game.tutorial_messages) - 1:
                     game.tutorial_index += 1
+                    game.audio.play_sfx("click")
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if game.paused:
+                game.audio.play_sfx("click")
                 if WIDTH//2 - 100 <= mx <= WIDTH//2 + 100 and HEIGHT//2 - 30 <= my <= HEIGHT//2 + 20: game.paused = False
                 if WIDTH//2 - 100 <= mx <= WIDTH//2 + 100 and HEIGHT//2 + 40 <= my <= HEIGHT//2 + 90: game.setup_menu()
                 continue
@@ -521,86 +586,102 @@ while running:
             if game.mode == "MENU":
                 if WIDTH//2 - 150 <= mx <= WIDTH//2 + 150:
                     if HEIGHT//2 - 40 <= my <= HEIGHT//2 + 20:
-                        game.is_endless = False
-                        game.start_run()
+                        game.audio.play_sfx("click")
+                        game.is_endless = False; game.start_run()
                     elif HEIGHT//2 + 40 <= my <= HEIGHT//2 + 100:
-                        game.is_endless = True
-                        game.start_run()
+                        game.audio.play_sfx("click")
+                        game.is_endless = True; game.start_run()
 
             elif game.mode == "MAP":
                 for node in game.available_next_nodes:
-                    if math.hypot(mx - node.x, my - node.y) < 25: game.select_node(node); break
+                    if math.hypot(mx - node.x, my - node.y) < 25: 
+                        game.audio.play_sfx("click")
+                        game.select_node(node); break
                         
             elif game.mode == "BATTLE" and game.battle_phase == "PLANNING":
-                if WIDTH-150 <= mx <= WIDTH-20 and 20 <= my <= 60: game.battle_phase = "ACTION"
+                if WIDTH-150 <= mx <= WIDTH-20 and 20 <= my <= 60: 
+                    game.audio.play_sfx("click")
+                    game.battle_phase = "ACTION"
                 hand_x = WIDTH//2 - (len(game.hand)*130)//2
                 for i, card in enumerate(game.hand):
                     cx, cy = hand_x + i * 130, HEIGHT - 180
-                    if cx <= mx <= cx+120 and cy <= my <= cy+160: game.dragging_card = card; break
+                    if cx <= mx <= cx+120 and cy <= my <= cy+160: 
+                        game.audio.play_sfx("click")
+                        game.dragging_card = card; break
 
             elif game.mode == "REWARD":
-                if WIDTH//2-50 <= mx <= WIDTH//2+50 and 550 <= my <= 590: game.mode = "MAP"
+                if WIDTH//2-50 <= mx <= WIDTH//2+50 and 550 <= my <= 590: 
+                    game.audio.play_sfx("click")
+                    game.mode = "MAP"
+                    game.audio.play_bgm("MAIN")
                 for i, card in enumerate(game.reward_choices):
                     if 300+i*150 <= mx <= 300+i*150+120 and 300 <= my <= 460:
+                        game.audio.play_sfx("click")
                         game.master_deck.append(card.clone()); game.mode = "MAP"
+                        game.audio.play_bgm("MAIN")
             
             elif game.mode == "ELITE_REWARD":
                 if WIDTH//2-100 <= mx <= WIDTH//2+100 and 600 <= my <= 640:
-                    if game.beat_boss_in_endless:
-                        game.beat_boss_in_endless = False
-                        game.loop_count += 1
-                        game.generate_map()
-                    game.mode = "MAP"
+                    game.audio.play_sfx("click")
+                    if game.beat_boss_in_endless: game.beat_boss_in_endless = False; game.loop_count += 1; game.generate_map()
+                    game.mode = "MAP"; game.audio.play_bgm("MAIN")
                     
                 if not game.reward_card_picked:
                     for i, card in enumerate(game.reward_choices):
-                        if 150+i*150 <= mx <= 150+i*150+120 and 200 <= my <= 360: game.master_deck.append(card.clone()); game.reward_card_picked = True
+                        if 150+i*150 <= mx <= 150+i*150+120 and 200 <= my <= 360: 
+                            game.audio.play_sfx("click"); game.master_deck.append(card.clone()); game.reward_card_picked = True
                 if not game.reward_passive_picked:
                     for i, passive in enumerate(game.elite_passive_choices):
-                        if 650 <= mx <= 850 and 200+i*100 <= my <= 280+i*100: game.add_passive(passive.id); game.reward_passive_picked = True
+                        if 650 <= mx <= 850 and 200+i*100 <= my <= 280+i*100: 
+                            game.audio.play_sfx("click"); game.add_passive(passive.id); game.reward_passive_picked = True
                 if game.reward_card_picked and game.reward_passive_picked:
-                    if game.beat_boss_in_endless:
-                        game.beat_boss_in_endless = False
-                        game.loop_count += 1
-                        game.generate_map()
-                    game.mode = "MAP"
+                    if game.beat_boss_in_endless: game.beat_boss_in_endless = False; game.loop_count += 1; game.generate_map()
+                    game.mode = "MAP"; game.audio.play_bgm("MAIN")
 
             elif game.mode == "SHOP":
-                if 400 <= mx <= 600 and 610 <= my <= 655: game.mode = "MAP"
-                elif 400 <= mx <= 600 and 555 <= my <= 600: game.mode = "SHOP_SELL"
+                if 400 <= mx <= 600 and 610 <= my <= 655: 
+                    game.audio.play_sfx("click"); game.mode = "MAP"; game.audio.play_bgm("MAIN")
+                elif 400 <= mx <= 600 and 555 <= my <= 600: 
+                    game.audio.play_sfx("click"); game.mode = "SHOP_SELL"
                 elif 400 <= mx <= 600 and 500 <= my <= 545:
-                    if game.gold >= game.shop_refresh_cost: game.gold -= game.shop_refresh_cost; game.shop_refresh_cost += 10; game.refresh_shop_items()
+                    if game.gold >= game.shop_refresh_cost: 
+                        game.audio.play_sfx("click"); game.gold -= game.shop_refresh_cost; game.shop_refresh_cost += 10; game.refresh_shop_items()
                 
                 for i, card in enumerate(game.shop_cards):
                     if card and 150+i*150 <= mx <= 150+i*150+120 and 300 <= my <= 460:
-                        if game.gold >= 50: game.gold -= 50; game.master_deck.append(card.clone()); game.shop_cards[i] = None
+                        if game.gold >= 50: game.audio.play_sfx("click"); game.gold -= 50; game.master_deck.append(card.clone()); game.shop_cards[i] = None
                 if game.shop_passive and 650 <= mx <= 850 and 300 <= my <= 380:
-                    if game.gold >= game.shop_passive.cost: game.gold -= game.shop_passive.cost; game.add_passive(game.shop_passive.id); game.shop_passive = None
+                    if game.gold >= game.shop_passive.cost: game.audio.play_sfx("click"); game.gold -= game.shop_passive.cost; game.add_passive(game.shop_passive.id); game.shop_passive = None
             
             elif game.mode == "SHOP_SELL":
-                if WIDTH//2 - 100 <= mx <= WIDTH//2 + 100 and HEIGHT - 60 <= my <= HEIGHT - 20: game.mode = "SHOP"
+                if WIDTH//2 - 100 <= mx <= WIDTH//2 + 100 and HEIGHT - 60 <= my <= HEIGHT - 20: 
+                    game.audio.play_sfx("click"); game.mode = "SHOP"
                 for i, card in enumerate(game.master_deck[:]):
                     cx, cy = 20 + (i%6)*130, 100 + (i//6)*170
                     if cx <= mx <= cx+120 and cy <= my <= cy+160:
+                        game.audio.play_sfx("click")
                         game.gold += 75 if card.upgraded else 25
                         game.master_deck.remove(card)
                         break
 
             elif game.mode == "CAMPFIRE":
-                if 200 <= mx <= 350 and 300 <= my <= 400: game.base_hp = min(game.base_max_hp, game.base_hp + 30); game.mode = "MAP"
-                if 425 <= mx <= 575 and 300 <= my <= 400: game.mode = "CAMPFIRE_SMITH"
-                if 650 <= mx <= 800 and 300 <= my <= 400: game.mode = "CAMPFIRE_COPY"
+                if 200 <= mx <= 350 and 300 <= my <= 400: 
+                    game.audio.play_sfx("click"); game.base_hp = min(game.base_max_hp, game.base_hp + 30); game.mode = "MAP"; game.audio.play_bgm("MAIN")
+                if 425 <= mx <= 575 and 300 <= my <= 400: game.audio.play_sfx("click"); game.mode = "CAMPFIRE_SMITH"
+                if 650 <= mx <= 800 and 300 <= my <= 400: game.audio.play_sfx("click"); game.mode = "CAMPFIRE_COPY"
             
             elif game.mode == "CAMPFIRE_SMITH":
                 for i, card in enumerate(game.master_deck):
                     if not card.upgraded:
                         cx, cy = 20 + (i%6)*130, 150 + (i//6)*170
-                        if cx <= mx <= cx+120 and cy <= my <= cy+160: card.upgrade(); game.mode = "MAP"; break
+                        if cx <= mx <= cx+120 and cy <= my <= cy+160: 
+                            game.audio.play_sfx("click"); card.upgrade(); game.mode = "MAP"; game.audio.play_bgm("MAIN"); break
 
             elif game.mode == "CAMPFIRE_COPY":
                 for i, card in enumerate(game.master_deck):
                     cx, cy = 20 + (i%6)*130, 150 + (i//6)*170
-                    if cx <= mx <= cx+120 and cy <= my <= cy+160: game.master_deck.append(card.clone()); game.mode = "MAP"; break
+                    if cx <= mx <= cx+120 and cy <= my <= cy+160: 
+                        game.audio.play_sfx("click"); game.master_deck.append(card.clone()); game.mode = "MAP"; game.audio.play_bgm("MAIN"); break
 
             elif game.mode in ["GAMEOVER", "WIN"]: game.setup_menu()
                 
@@ -623,7 +704,6 @@ while running:
         overlay = pygame.Surface((WIDTH, HEIGHT)); overlay.set_alpha(150); overlay.fill(BLACK); screen.blit(overlay, (0,0))
         draw_text(screen, "SPIRE DEFENSE", pygame.font.SysFont("Arial", 60, bold=True), GOLD, WIDTH//2, HEIGHT//3, center=True)
         
-        # MENU BUTTONS
         pygame.draw.rect(screen, BLUE if (WIDTH//2-150 <= mx <= WIDTH//2+150 and HEIGHT//2-40 <= my <= HEIGHT//2+20) else DARK_GRAY, (WIDTH//2 - 150, HEIGHT//2 - 40, 300, 60), border_radius=10)
         draw_text(screen, "STANDARD RUN", large_font, WHITE, WIDTH//2, HEIGHT//2 - 10, center=True)
         
@@ -699,7 +779,6 @@ while running:
 
     elif game.mode == "SHOP":
         draw_text(screen, f"SHOP - Gold: {game.gold}", large_font, GOLD, WIDTH//2, 100, center=True)
-        
         for i, card in enumerate(game.shop_cards):
             if card: 
                 cx, cy = 150 + i * 150, 300
