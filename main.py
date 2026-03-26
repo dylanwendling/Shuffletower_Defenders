@@ -19,7 +19,7 @@ PINK, SLIME = (255, 105, 180), (100, 255, 100)
 
 pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Spire Defense: Infinite Combos")
+pygame.display.set_caption("Spire Defense: Deck Thinning & Duplication")
 clock = pygame.time.Clock()
 font = pygame.font.SysFont("Arial", 16, bold=True)
 large_font = pygame.font.SysFont("Arial", 32, bold=True)
@@ -59,7 +59,7 @@ class CardTemplate:
             elif self.type == "SKILL":
                 if "Repair" in self.name:
                     self.energy_gain += 1
-                    self.cost = 0 # Buffed Repair+ to cost 0
+                    self.cost = 0 
                     self.description = "Heals base by 15 HP. Gain 1 Energy."
                 elif "Quick Thinking" in self.name:
                     self.draw_amount = 2
@@ -525,24 +525,42 @@ while running:
                 if game.reward_card_picked and game.reward_passive_picked: game.mode = "MAP"
 
             elif game.mode == "SHOP":
-                if 400 <= mx <= 600 and 600 <= my <= 650: game.mode = "MAP"
+                if 400 <= mx <= 600 and 610 <= my <= 655: game.mode = "MAP" # Leave
+                elif 400 <= mx <= 600 and 555 <= my <= 600: game.mode = "SHOP_SELL" # Open Sell Menu
+                elif 400 <= mx <= 600 and 500 <= my <= 545: # Refresh
+                    if game.gold >= game.shop_refresh_cost: game.gold -= game.shop_refresh_cost; game.shop_refresh_cost += 10; game.refresh_shop_items()
+                
+                # Buy Logic
                 for i, card in enumerate(game.shop_cards):
                     if card and 150+i*150 <= mx <= 150+i*150+120 and 300 <= my <= 460:
                         if game.gold >= 50: game.gold -= 50; game.master_deck.append(card.clone()); game.shop_cards[i] = None
                 if game.shop_passive and 650 <= mx <= 850 and 300 <= my <= 380:
                     if game.gold >= game.shop_passive.cost: game.gold -= game.shop_passive.cost; game.add_passive(game.shop_passive.id); game.shop_passive = None
-                if 400 <= mx <= 600 and 520 <= my <= 570:
-                    if game.gold >= game.shop_refresh_cost: game.gold -= game.shop_refresh_cost; game.shop_refresh_cost += 10; game.refresh_shop_items()
+            
+            elif game.mode == "SHOP_SELL":
+                if WIDTH//2 - 100 <= mx <= WIDTH//2 + 100 and HEIGHT - 60 <= my <= HEIGHT - 20: game.mode = "SHOP" # Back
+                for i, card in enumerate(game.master_deck[:]):
+                    cx, cy = 20 + (i%6)*130, 100 + (i//6)*170
+                    if cx <= mx <= cx+120 and cy <= my <= cy+160:
+                        game.gold += 75 if card.upgraded else 25
+                        game.master_deck.remove(card)
+                        break # Only sell one per click to prevent accidental double-clicks
 
             elif game.mode == "CAMPFIRE":
-                if 300 <= mx <= 450 and 300 <= my <= 400: game.base_hp = min(game.base_max_hp, game.base_hp + 30); game.mode = "MAP"
-                if 550 <= mx <= 700 and 300 <= my <= 400: game.mode = "CAMPFIRE_SMITH"
+                if 200 <= mx <= 350 and 300 <= my <= 400: game.base_hp = min(game.base_max_hp, game.base_hp + 30); game.mode = "MAP"
+                if 425 <= mx <= 575 and 300 <= my <= 400: game.mode = "CAMPFIRE_SMITH"
+                if 650 <= mx <= 800 and 300 <= my <= 400: game.mode = "CAMPFIRE_COPY"
             
             elif game.mode == "CAMPFIRE_SMITH":
                 for i, card in enumerate(game.master_deck):
                     if not card.upgraded:
                         cx, cy = 20 + (i%6)*130, 150 + (i//6)*170
                         if cx <= mx <= cx+120 and cy <= my <= cy+160: card.upgrade(); game.mode = "MAP"; break
+
+            elif game.mode == "CAMPFIRE_COPY":
+                for i, card in enumerate(game.master_deck):
+                    cx, cy = 20 + (i%6)*130, 150 + (i//6)*170
+                    if cx <= mx <= cx+120 and cy <= my <= cy+160: game.master_deck.append(card.clone()); game.mode = "MAP"; break
 
             elif game.mode in ["GAMEOVER", "WIN"]: game.setup_menu()
                 
@@ -629,7 +647,6 @@ while running:
 
     elif game.mode == "SHOP":
         draw_text(screen, f"SHOP - Gold: {game.gold}", large_font, GOLD, WIDTH//2, 100, center=True)
-        
         for i, card in enumerate(game.shop_cards):
             if card: 
                 cx, cy = 150 + i * 150, 300
@@ -637,18 +654,43 @@ while running:
                 draw_card(screen, card, cx, cy, (cx <= mx <= cx+120 and cy <= my <= cy+160))
                 
         if game.shop_passive: draw_item_box(screen, game.shop_passive.name, game.shop_passive.description, game.shop_passive.cost, 650, 300, 200, 80, 650 <= mx <= 850 and 300 <= my <= 380)
-        pygame.draw.rect(screen, BLUE if 400 <= mx <= 600 and 520 <= my <= 570 else DARK_GRAY, (400, 520, 200, 50), border_radius=5)
-        draw_text(screen, f"Refresh Shop ({game.shop_refresh_cost}g)", font, WHITE, 500, 545, center=True)
-        pygame.draw.rect(screen, RED, (400, 600, 200, 50), border_radius=5)
-        draw_text(screen, "LEAVE SHOP", font, WHITE, 500, 625, center=True)
+        
+        # Updated Shop Buttons
+        pygame.draw.rect(screen, BLUE if 400 <= mx <= 600 and 500 <= my <= 545 else DARK_GRAY, (400, 500, 200, 45), border_radius=5)
+        draw_text(screen, f"Refresh Shop ({game.shop_refresh_cost}g)", font, WHITE, 500, 522, center=True)
+        
+        pygame.draw.rect(screen, ORANGE if 400 <= mx <= 600 and 555 <= my <= 600 else DARK_GRAY, (400, 555, 200, 45), border_radius=5)
+        draw_text(screen, "SELL CARDS", font, WHITE, 500, 577, center=True)
+        
+        pygame.draw.rect(screen, RED if 400 <= mx <= 600 and 610 <= my <= 655 else DARK_GRAY, (400, 610, 200, 45), border_radius=5)
+        draw_text(screen, "LEAVE SHOP", font, WHITE, 500, 632, center=True)
+        
         draw_passives(screen, game, mx, my)
+
+    elif game.mode == "SHOP_SELL":
+        draw_text(screen, f"CLICK A CARD TO SELL - Gold: {game.gold}", large_font, GOLD, WIDTH//2, 50, center=True)
+        for i, card in enumerate(game.master_deck):
+            cx, cy = 20 + (i%6)*130, 100 + (i//6)*170
+            is_hover = cx <= mx <= cx+120 and cy <= my <= cy+160
+            draw_card(screen, card, cx, cy, is_hover)
+            if is_hover:
+                sell_price = 75 if card.upgraded else 25
+                draw_text(screen, f"+{sell_price}g", large_font, GOLD, cx+60, cy+80, center=True)
+                
+        pygame.draw.rect(screen, GRAY, (WIDTH//2 - 100, HEIGHT - 60, 200, 40), border_radius=5)
+        draw_text(screen, "BACK TO SHOP", font, BLACK, WIDTH//2, HEIGHT - 40, center=True)
 
     elif game.mode == "CAMPFIRE":
         draw_text(screen, "CAMPFIRE", large_font, GOLD, WIDTH//2, 100, center=True)
-        pygame.draw.rect(screen, GREEN, (300, 300, 150, 100), border_radius=10)
-        draw_text(screen, "REST", large_font, BLACK, 375, 340, center=True)
-        pygame.draw.rect(screen, BLUE, (550, 300, 150, 100), border_radius=10)
-        draw_text(screen, "SMITH", large_font, BLACK, 625, 340, center=True)
+        
+        pygame.draw.rect(screen, GREEN, (200, 300, 150, 100), border_radius=10)
+        draw_text(screen, "REST", large_font, BLACK, 275, 340, center=True)
+        
+        pygame.draw.rect(screen, BLUE, (425, 300, 150, 100), border_radius=10)
+        draw_text(screen, "SMITH", large_font, BLACK, 500, 340, center=True)
+        
+        pygame.draw.rect(screen, PURPLE, (650, 300, 150, 100), border_radius=10)
+        draw_text(screen, "COPY", large_font, WHITE, 725, 340, center=True)
 
     elif game.mode == "CAMPFIRE_SMITH":
         draw_text(screen, "CHOOSE A CARD TO UPGRADE", large_font, GOLD, WIDTH//2, 50, center=True)
@@ -663,6 +705,13 @@ while running:
             pygame.draw.rect(screen, DARK_GRAY, (WIDTH-220, 150, 200, 300), border_radius=10)
             draw_text(screen, "UPGRADE PREVIEW", font, GOLD, WIDTH-120, 170, center=True)
             draw_card(screen, preview_card, WIDTH-180, 210, True)
+
+    elif game.mode == "CAMPFIRE_COPY":
+        draw_text(screen, "CHOOSE A CARD TO DUPLICATE", large_font, PURPLE, WIDTH//2, 50, center=True)
+        for i, card in enumerate(game.master_deck):
+            cx, cy = 20 + (i%6)*130, 150 + (i//6)*170
+            is_hover = cx <= mx <= cx+120 and cy <= my <= cy+160
+            draw_card(screen, card, cx, cy, is_hover)
 
     elif game.mode == "REWARD":
         draw_text(screen, "VICTORY! CHOOSE A REWARD", large_font, WHITE, WIDTH//2, 100, center=True)
