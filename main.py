@@ -19,7 +19,7 @@ PINK, SLIME = (255, 105, 180), (100, 255, 100)
 
 pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Spire Defense: UI Update")
+pygame.display.set_caption("Spire Defense: Endless Mode & Increased Rests")
 clock = pygame.time.Clock()
 font = pygame.font.SysFont("Arial", 16, bold=True)
 large_font = pygame.font.SysFont("Arial", 32, bold=True)
@@ -138,6 +138,10 @@ class GameState:
 
     def setup_menu(self):
         self.mode, self.paused, self.tutorial_active = "MENU", False, False
+        self.is_endless = False
+        self.loop_count = 0
+        self.beat_boss_in_endless = False
+        
         cards = get_all_cards()
         self.towers = [Tower(2, 4, cards[0]), Tower(5, 3, cards[1]), Tower(8, 4, cards[2]), Tower(10, 4, cards[0])]
         self.walls = {(7, 5): Wall(7, 5, 9999)}
@@ -166,7 +170,13 @@ class GameState:
             for n in range(num_nodes):
                 x = WIDTH // 2 + (n - (num_nodes-1)/2) * 120 + random.randint(-15, 15)
                 y = HEIGHT - 100 - t * 100
-                type = 'TUTORIAL' if t == 0 else random.choices(['BATTLE', 'ELITE', 'SHOP', 'CAMPFIRE'], weights=[45, 20, 20, 15])[0]
+                if self.loop_count == 0 and t == 0:
+                    type = 'TUTORIAL'
+                elif t == 0:
+                    type = 'BATTLE'
+                else:
+                    # INCREASED WEIGHTS FOR SHOP AND CAMPFIRE
+                    type = random.choices(['BATTLE', 'ELITE', 'SHOP', 'CAMPFIRE'], weights=[35, 15, 25, 25])[0]
                 tier_nodes.append(MapNode(x, y, type, t))
             self.map_tiers.append(tier_nodes)
         self.map_tiers.append([MapNode(WIDTH//2, 80, 'BOSS', 5)])
@@ -185,6 +195,7 @@ class GameState:
         self._init_starter_deck()
         self.passives.clear()
         self.base_hp, self.gold = self.base_max_hp, 50
+        self.loop_count = 0
         self.generate_map()
         self.mode = "MAP"
 
@@ -212,7 +223,7 @@ class GameState:
     def enter_battle(self, encounter_type):
         self.towers.clear(); self.walls.clear(); self.enemies.clear(); self.explosions.clear()
         self.wave, self.max_waves = 1, (4 if encounter_type == 'ELITE' else 3)
-        self.tutorial_active = (encounter_type == 'TUTORIAL')
+        self.tutorial_active = (encounter_type == 'TUTORIAL' and self.loop_count == 0)
         self.tutorial_index = 0
         self.draw_pile = [c.clone() for c in self.master_deck]
         random.shuffle(self.draw_pile)
@@ -238,8 +249,9 @@ class GameState:
             else: self.enemies_to_spawn = [Enemy("TANK", hp_scale)] + [Enemy("NORMAL", hp_scale) for _ in range(2)]
             return
 
-        hp_scale = 0.8 + (self.current_node.tier * 0.25)
-        count = 3 + self.wave * 2 + (self.current_node.tier)
+        # ENDLESS MODE SCALING applied here
+        hp_scale = 0.8 + (self.current_node.tier * 0.25) + (self.loop_count * 2.0)
+        count = 3 + self.wave * 2 + (self.current_node.tier) + (self.loop_count * 2)
 
         if self.current_node.type in ['ELITE', 'BOSS'] and self.wave in [2, 3]: count += 4 
 
@@ -362,6 +374,13 @@ class GameState:
             self.spawn_timer = 45
         self._simulate_entities(is_menu=True)
 
+    def generate_elite_rewards(self):
+        self.reward_choices = [c.clone() for c in random.sample(get_all_cards(), 3)]
+        for c in self.reward_choices: c.upgrade()
+        avail = [p for p in get_all_passives() if p.id not in self.passives]
+        self.elite_passive_choices = random.sample(avail, min(3, len(avail)))
+        self.reward_card_picked, self.reward_passive_picked = False, False
+
     def update_battle(self):
         if self.paused: return
         if self.battle_phase == "ACTION":
@@ -376,13 +395,16 @@ class GameState:
             if not self.enemies and not self.enemies_to_spawn:
                 if self.wave >= self.max_waves:
                     if "GOLD_1" in self.passives: self.gold += 20
-                    if self.current_node.type == 'BOSS': self.mode = "WIN"
+                    
+                    if self.current_node.type == 'BOSS':
+                        if self.is_endless:
+                            self.beat_boss_in_endless = True
+                            self.generate_elite_rewards()
+                            self.mode = "ELITE_REWARD"
+                        else:
+                            self.mode = "WIN"
                     elif self.current_node.type == 'ELITE':
-                        self.reward_choices = [c.clone() for c in random.sample(get_all_cards(), 3)]
-                        for c in self.reward_choices: c.upgrade()
-                        avail = [p for p in get_all_passives() if p.id not in self.passives]
-                        self.elite_passive_choices = random.sample(avail, min(3, len(avail)))
-                        self.reward_card_picked, self.reward_passive_picked = False, False
+                        self.generate_elite_rewards()
                         self.mode = "ELITE_REWARD"
                     else:
                         self.reward_choices = random.sample(get_all_cards(), 3)
@@ -496,7 +518,15 @@ while running:
                 if WIDTH//2 - 100 <= mx <= WIDTH//2 + 100 and HEIGHT//2 + 40 <= my <= HEIGHT//2 + 90: game.setup_menu()
                 continue
 
-            if game.mode == "MENU": game.start_run()
+            if game.mode == "MENU":
+                if WIDTH//2 - 150 <= mx <= WIDTH//2 + 150:
+                    if HEIGHT//2 - 40 <= my <= HEIGHT//2 + 20:
+                        game.is_endless = False
+                        game.start_run()
+                    elif HEIGHT//2 + 40 <= my <= HEIGHT//2 + 100:
+                        game.is_endless = True
+                        game.start_run()
+
             elif game.mode == "MAP":
                 for node in game.available_next_nodes:
                     if math.hypot(mx - node.x, my - node.y) < 25: game.select_node(node); break
@@ -515,14 +545,25 @@ while running:
                         game.master_deck.append(card.clone()); game.mode = "MAP"
             
             elif game.mode == "ELITE_REWARD":
-                if WIDTH//2-100 <= mx <= WIDTH//2+100 and 600 <= my <= 640: game.mode = "MAP"
+                if WIDTH//2-100 <= mx <= WIDTH//2+100 and 600 <= my <= 640:
+                    if game.beat_boss_in_endless:
+                        game.beat_boss_in_endless = False
+                        game.loop_count += 1
+                        game.generate_map()
+                    game.mode = "MAP"
+                    
                 if not game.reward_card_picked:
                     for i, card in enumerate(game.reward_choices):
                         if 150+i*150 <= mx <= 150+i*150+120 and 200 <= my <= 360: game.master_deck.append(card.clone()); game.reward_card_picked = True
                 if not game.reward_passive_picked:
                     for i, passive in enumerate(game.elite_passive_choices):
                         if 650 <= mx <= 850 and 200+i*100 <= my <= 280+i*100: game.add_passive(passive.id); game.reward_passive_picked = True
-                if game.reward_card_picked and game.reward_passive_picked: game.mode = "MAP"
+                if game.reward_card_picked and game.reward_passive_picked:
+                    if game.beat_boss_in_endless:
+                        game.beat_boss_in_endless = False
+                        game.loop_count += 1
+                        game.generate_map()
+                    game.mode = "MAP"
 
             elif game.mode == "SHOP":
                 if 400 <= mx <= 600 and 610 <= my <= 655: game.mode = "MAP"
@@ -581,10 +622,17 @@ while running:
         draw_grid_and_entities(screen, game)
         overlay = pygame.Surface((WIDTH, HEIGHT)); overlay.set_alpha(150); overlay.fill(BLACK); screen.blit(overlay, (0,0))
         draw_text(screen, "SPIRE DEFENSE", pygame.font.SysFont("Arial", 60, bold=True), GOLD, WIDTH//2, HEIGHT//3, center=True)
-        draw_text(screen, "Click anywhere to start", large_font, WHITE, WIDTH//2, HEIGHT//2, center=True)
+        
+        # MENU BUTTONS
+        pygame.draw.rect(screen, BLUE if (WIDTH//2-150 <= mx <= WIDTH//2+150 and HEIGHT//2-40 <= my <= HEIGHT//2+20) else DARK_GRAY, (WIDTH//2 - 150, HEIGHT//2 - 40, 300, 60), border_radius=10)
+        draw_text(screen, "STANDARD RUN", large_font, WHITE, WIDTH//2, HEIGHT//2 - 10, center=True)
+        
+        pygame.draw.rect(screen, PURPLE if (WIDTH//2-150 <= mx <= WIDTH//2+150 and HEIGHT//2+40 <= my <= HEIGHT//2+100) else DARK_GRAY, (WIDTH//2 - 150, HEIGHT//2 + 40, 300, 60), border_radius=10)
+        draw_text(screen, "ENDLESS MODE", large_font, WHITE, WIDTH//2, HEIGHT//2 + 70, center=True)
         
     elif game.mode == "MAP":
-        draw_text(screen, f"HP: {game.base_hp}/{game.base_max_hp} | Gold: {game.gold}", large_font, WHITE, WIDTH//2, 70, center=True)
+        loop_text = f" | Loop: {game.loop_count + 1}" if game.is_endless else ""
+        draw_text(screen, f"HP: {game.base_hp}/{game.base_max_hp} | Gold: {game.gold}{loop_text}", large_font, WHITE, WIDTH//2, 70, center=True)
         draw_passives(screen, game, mx, my)
         for tier in game.map_tiers:
             for node in tier:
@@ -607,10 +655,8 @@ while running:
         draw_text(screen, f"Gold: {game.gold}", font, GOLD, 20, 40)
         draw_text(screen, f"Wave: {game.wave}/{game.max_waves}", font, WHITE, 20, 60)
         
-        # --- UI ALIGNMENT UPDATE: Move Energy and draw Piles ---
         draw_text(screen, f"Energy: {game.energy}/{game.max_energy}", large_font, BLUE, 20, HEIGHT - 130)
         draw_text(screen, f"Draw Pile: {len(game.draw_pile)}", font, WHITE, 20, HEIGHT - 80)
-        
         draw_text(screen, f"Discard: {len(game.discard_pile)}", font, GRAY, WIDTH - 150, HEIGHT - 130)
         draw_text(screen, f"Exhaust: {len(game.exhaust_pile)}", font, ORANGE, WIDTH - 150, HEIGHT - 90)
 
@@ -653,6 +699,7 @@ while running:
 
     elif game.mode == "SHOP":
         draw_text(screen, f"SHOP - Gold: {game.gold}", large_font, GOLD, WIDTH//2, 100, center=True)
+        
         for i, card in enumerate(game.shop_cards):
             if card: 
                 cx, cy = 150 + i * 150, 300
