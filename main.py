@@ -19,7 +19,7 @@ PINK, SLIME = (255, 105, 180), (100, 255, 100)
 
 pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Spire Defense: Lethal Bosses & Massive Swarms")
+pygame.display.set_caption("Spire Defense: Card Draw & Exhaust Mechanics")
 clock = pygame.time.Clock()
 font = pygame.font.SysFont("Arial", 16, bold=True)
 large_font = pygame.font.SysFont("Arial", 32, bold=True)
@@ -31,18 +31,22 @@ PATH = [(0,2), (1,2), (2,2), (3,2), (3,3), (3,4), (3,5), (4,5), (5,5),
 # --- DATA CLASSES ---
 
 class CardTemplate:
-    def __init__(self, name, cost, type, damage=0, range=0, fire_rate=0, hp=0, aoe_radius=0, description=""):
+    def __init__(self, name, cost, type, damage=0, range=0, fire_rate=0, hp=0, aoe_radius=0, draw=0, energy_gain=0, exhaust=False, description=""):
         self.name, self.base_cost, self.cost = name, cost, cost
         self.type = type
         self.base_damage, self.damage = damage, damage
         self.range, self.fire_rate = range, fire_rate
         self.base_hp, self.hp = hp, hp
         self.aoe_radius = aoe_radius
+        self.base_draw, self.draw_amount = draw, draw
+        self.base_energy_gain, self.energy_gain = energy_gain, energy_gain
+        self.exhaust = exhaust
         self.description, self.upgraded = description, False
 
     def clone(self):
-        c = CardTemplate(self.name, self.base_cost, self.type, self.base_damage, self.range, self.fire_rate, self.base_hp, self.aoe_radius, self.description)
+        c = CardTemplate(self.name, self.base_cost, self.type, self.base_damage, self.range, self.fire_rate, self.base_hp, self.aoe_radius, self.base_draw, self.base_energy_gain, self.exhaust, self.description)
         c.upgraded, c.cost, c.damage, c.hp = self.upgraded, self.cost, self.damage, self.hp
+        c.draw_amount, c.energy_gain = self.draw_amount, self.energy_gain
         return c
 
     def upgrade(self):
@@ -52,7 +56,18 @@ class CardTemplate:
                 self.damage += int(self.base_damage * 0.5)
                 if self.aoe_radius > 0: self.aoe_radius += 20
             elif self.type == "WALL": self.hp += int(self.base_hp * 0.5)
-            elif self.type == "SKILL": self.cost = max(0, self.cost - 1)
+            elif self.type == "SKILL":
+                if "Repair" in self.name:
+                    self.energy_gain += 1
+                    self.description = "Heals base by 15 HP. Gain 1 Energy."
+                elif "Quick Thinking" in self.name:
+                    self.draw_amount = 2
+                    self.energy_gain = 2
+                    self.description = "Draw 2. Gain 2 Energy."
+                elif "Brainstorm" in self.name:
+                    self.cost = 0
+                else:
+                    self.cost = max(0, self.cost - 1)
 
 def get_all_cards():
     return [
@@ -60,7 +75,9 @@ def get_all_cards():
         CardTemplate("Cannon", 2, "TOWER", damage=35, range=100, fire_rate=100, description="Heavy damage, slow."),
         CardTemplate("The Bomber", 2, "TOWER", damage=25, range=110, fire_rate=120, aoe_radius=60, description="Deals splash damage."),
         CardTemplate("Wooden Wall", 1, "WALL", hp=50, description="Blocks path. Has 50 HP."),
-        CardTemplate("Repair", 1, "SKILL", description="Heals base by 15 HP.")
+        CardTemplate("Repair", 1, "SKILL", description="Heals base by 15 HP."),
+        CardTemplate("Quick Thinking", 1, "SKILL", draw=1, energy_gain=1, description="Draw 1. Gain 1 Energy."),
+        CardTemplate("Brainstorm", 1, "SKILL", draw=3, exhaust=True, description="Draw 3. Exhaust.")
     ]
 
 class Passive:
@@ -127,7 +144,7 @@ class GameState:
         self.master_deck, self.passives, self.map_tiers = [], [], []
         self.base_max_hp, self.gold, self.base_hp = 100, 50, 100
         self.current_node, self.available_next_nodes = None, []
-        self.draw_pile, self.discard_pile, self.hand = [], [], []
+        self.draw_pile, self.discard_pile, self.exhaust_pile, self.hand = [], [], [], []
         self.max_energy, self.energy = 3, 3
         self.wave, self.max_waves, self.battle_phase = 1, 3, "PLANNING"
         self.enemies_to_spawn, self.shop_cards, self.shop_passive = [], [], None
@@ -138,6 +155,7 @@ class GameState:
 
     def _init_starter_deck(self):
         cards = get_all_cards()
+        # Adjusted starter deck to include the new fun skill cards occasionally if bought, but standard for now
         self.master_deck = [cards[0].clone(), cards[0].clone(), cards[0].clone(), cards[3].clone(), cards[3].clone(), cards[4].clone()]
 
     def generate_map(self):
@@ -195,10 +213,10 @@ class GameState:
         self.towers.clear(); self.walls.clear(); self.enemies.clear(); self.explosions.clear()
         self.wave, self.max_waves = 1, (4 if encounter_type == 'ELITE' else 3)
         self.tutorial_active = (encounter_type == 'TUTORIAL')
-        self.tutorial_index = 0 # Reset tutorial dialogue
+        self.tutorial_index = 0
         self.draw_pile = [c.clone() for c in self.master_deck]
         random.shuffle(self.draw_pile)
-        self.discard_pile.clear(); self.hand.clear()
+        self.discard_pile.clear(); self.exhaust_pile.clear(); self.hand.clear()
         self.start_turn()
         self.mode = "BATTLE"
 
@@ -213,7 +231,6 @@ class GameState:
         self.discard_pile.extend(self.hand); self.hand.clear(); self.draw_cards(5)
         self.enemies_to_spawn = []
         
-        # Difficulty Scaling
         if self.tutorial_active:
             hp_scale = 0.5
             if self.wave == 1: self.enemies_to_spawn = [Enemy("NORMAL", hp_scale) for _ in range(3)]
@@ -224,14 +241,11 @@ class GameState:
         hp_scale = 0.8 + (self.current_node.tier * 0.25)
         count = 3 + self.wave * 2 + (self.current_node.tier)
 
-        # INCREASE SPAWNS FOR ELITE AND BOSS WAVES 2 AND 3
-        if self.current_node.type in ['ELITE', 'BOSS'] and self.wave in [2, 3]:
-            count += 4 
+        if self.current_node.type in ['ELITE', 'BOSS'] and self.wave in [2, 3]: count += 4 
 
         if self.current_node.type == 'BOSS':
             if self.wave == 3:
                 self.enemies_to_spawn.append(Enemy("BOSS", hp_scale))
-                # Spawn massive final wave alongside the boss
                 for _ in range(count):
                     etype = random.choices(["SWARM", "TANK", "FLYING"], weights=[30, 40, 30])[0]
                     self.enemies_to_spawn.append(Enemy(etype, hp_scale))
@@ -242,7 +256,7 @@ class GameState:
                     if etype == "SWARM": self.enemies_to_spawn.append(Enemy("SWARM", hp_scale))
                     
         elif self.current_node.type == 'ELITE':
-            if self.wave == 4: # Final wave of Elite is just the mini-boss and some escorts
+            if self.wave == 4:
                 self.enemies_to_spawn.append(Enemy("ELITE", hp_scale))
                 for _ in range(count // 2): self.enemies_to_spawn.append(random.choice([Enemy("TANK", hp_scale), Enemy("FLYING", hp_scale)]))
             else:
@@ -260,6 +274,7 @@ class GameState:
 
     def play_card(self, card, gx, gy):
         if self.energy < card.cost: return False
+        
         if card.type == "TOWER":
             if (gx, gy) in PATH or any(t.gx == gx and t.gy == gy for t in self.towers): return False
             self.towers.append(Tower(gx, gy, card))
@@ -268,8 +283,19 @@ class GameState:
             self.walls[(gx, gy)] = Wall(gx, gy, card.hp)
         elif card.type == "SKILL":
             if "Repair" in card.name: self.base_hp = min(self.base_max_hp, self.base_hp + 15)
+            # Skills like "Quick Thinking" can be dropped anywhere on the grid
                 
-        self.energy -= card.cost; self.hand.remove(card); self.discard_pile.append(card)
+        self.energy -= card.cost
+        self.hand.remove(card)
+        
+        # New Draw and Energy Mechanics
+        if card.draw_amount > 0: self.draw_cards(card.draw_amount)
+        if card.energy_gain > 0: self.energy += card.energy_gain
+        
+        # Exhaust Mechanic
+        if card.exhaust: self.exhaust_pile.append(card)
+        else: self.discard_pile.append(card)
+        
         return True
 
     def _simulate_entities(self, is_menu=False):
@@ -299,15 +325,11 @@ class GameState:
                 self.enemies.remove(e)
             elif reached_end:
                 if not is_menu:
-                    # INSTANT BOSS KILL & DOUBLE ELITE NODE DAMAGE
                     if e.type == 'BOSS':
-                        self.base_hp = 0
-                        self.mode = "GAMEOVER"
+                        self.base_hp = 0; self.mode = "GAMEOVER"
                     else:
                         dmg = 15 if e.type == 'ELITE' else 5
-                        if self.current_node and self.current_node.type in ['ELITE', 'BOSS']:
-                            dmg *= 2 # Double damage applied during Boss and Elite encounters
-                        
+                        if self.current_node and self.current_node.type in ['ELITE', 'BOSS']: dmg *= 2 
                         self.base_hp -= dmg
                         if self.base_hp <= 0: self.mode = "GAMEOVER"
                         
