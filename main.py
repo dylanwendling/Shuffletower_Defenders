@@ -19,7 +19,7 @@ PINK, SLIME = (255, 105, 180), (100, 255, 100)
 
 pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Spire Defense: Card Draw & Exhaust Mechanics")
+pygame.display.set_caption("Spire Defense: Infinite Combos")
 clock = pygame.time.Clock()
 font = pygame.font.SysFont("Arial", 16, bold=True)
 large_font = pygame.font.SysFont("Arial", 32, bold=True)
@@ -59,6 +59,7 @@ class CardTemplate:
             elif self.type == "SKILL":
                 if "Repair" in self.name:
                     self.energy_gain += 1
+                    self.cost = 0 # Buffed Repair+ to cost 0
                     self.description = "Heals base by 15 HP. Gain 1 Energy."
                 elif "Quick Thinking" in self.name:
                     self.draw_amount = 2
@@ -76,8 +77,8 @@ def get_all_cards():
         CardTemplate("The Bomber", 2, "TOWER", damage=25, range=110, fire_rate=120, aoe_radius=60, description="Deals splash damage."),
         CardTemplate("Wooden Wall", 1, "WALL", hp=50, description="Blocks path. Has 50 HP."),
         CardTemplate("Repair", 1, "SKILL", description="Heals base by 15 HP."),
-        CardTemplate("Quick Thinking", 1, "SKILL", draw=1, energy_gain=1, description="Draw 1. Gain 1 Energy."),
-        CardTemplate("Brainstorm", 1, "SKILL", draw=3, exhaust=True, description="Draw 3. Exhaust.")
+        CardTemplate("Quick Thinking", 0, "SKILL", draw=1, energy_gain=1, description="Draw 1. Gain 1 Energy."),
+        CardTemplate("Brainstorm", 1, "SKILL", draw=3, energy_gain=1, exhaust=True, description="Draw 3. Gain 1 Energy. Exhaust.")
     ]
 
 class Passive:
@@ -155,7 +156,6 @@ class GameState:
 
     def _init_starter_deck(self):
         cards = get_all_cards()
-        # Adjusted starter deck to include the new fun skill cards occasionally if bought, but standard for now
         self.master_deck = [cards[0].clone(), cards[0].clone(), cards[0].clone(), cards[3].clone(), cards[3].clone(), cards[4].clone()]
 
     def generate_map(self):
@@ -283,16 +283,13 @@ class GameState:
             self.walls[(gx, gy)] = Wall(gx, gy, card.hp)
         elif card.type == "SKILL":
             if "Repair" in card.name: self.base_hp = min(self.base_max_hp, self.base_hp + 15)
-            # Skills like "Quick Thinking" can be dropped anywhere on the grid
                 
         self.energy -= card.cost
         self.hand.remove(card)
         
-        # New Draw and Energy Mechanics
         if card.draw_amount > 0: self.draw_cards(card.draw_amount)
         if card.energy_gain > 0: self.energy += card.energy_gain
         
-        # Exhaust Mechanic
         if card.exhaust: self.exhaust_pile.append(card)
         else: self.discard_pile.append(card)
         
