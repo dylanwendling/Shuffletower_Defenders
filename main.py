@@ -19,7 +19,7 @@ PINK, SLIME = (255, 105, 180), (100, 255, 100)
 
 pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Spire Defense: Deck Thinning & Duplication")
+pygame.display.set_caption("Spire Defense: UI Update")
 clock = pygame.time.Clock()
 font = pygame.font.SysFont("Arial", 16, bold=True)
 large_font = pygame.font.SysFont("Arial", 32, bold=True)
@@ -525,12 +525,11 @@ while running:
                 if game.reward_card_picked and game.reward_passive_picked: game.mode = "MAP"
 
             elif game.mode == "SHOP":
-                if 400 <= mx <= 600 and 610 <= my <= 655: game.mode = "MAP" # Leave
-                elif 400 <= mx <= 600 and 555 <= my <= 600: game.mode = "SHOP_SELL" # Open Sell Menu
-                elif 400 <= mx <= 600 and 500 <= my <= 545: # Refresh
+                if 400 <= mx <= 600 and 610 <= my <= 655: game.mode = "MAP"
+                elif 400 <= mx <= 600 and 555 <= my <= 600: game.mode = "SHOP_SELL"
+                elif 400 <= mx <= 600 and 500 <= my <= 545:
                     if game.gold >= game.shop_refresh_cost: game.gold -= game.shop_refresh_cost; game.shop_refresh_cost += 10; game.refresh_shop_items()
                 
-                # Buy Logic
                 for i, card in enumerate(game.shop_cards):
                     if card and 150+i*150 <= mx <= 150+i*150+120 and 300 <= my <= 460:
                         if game.gold >= 50: game.gold -= 50; game.master_deck.append(card.clone()); game.shop_cards[i] = None
@@ -538,13 +537,13 @@ while running:
                     if game.gold >= game.shop_passive.cost: game.gold -= game.shop_passive.cost; game.add_passive(game.shop_passive.id); game.shop_passive = None
             
             elif game.mode == "SHOP_SELL":
-                if WIDTH//2 - 100 <= mx <= WIDTH//2 + 100 and HEIGHT - 60 <= my <= HEIGHT - 20: game.mode = "SHOP" # Back
+                if WIDTH//2 - 100 <= mx <= WIDTH//2 + 100 and HEIGHT - 60 <= my <= HEIGHT - 20: game.mode = "SHOP"
                 for i, card in enumerate(game.master_deck[:]):
                     cx, cy = 20 + (i%6)*130, 100 + (i//6)*170
                     if cx <= mx <= cx+120 and cy <= my <= cy+160:
                         game.gold += 75 if card.upgraded else 25
                         game.master_deck.remove(card)
-                        break # Only sell one per click to prevent accidental double-clicks
+                        break
 
             elif game.mode == "CAMPFIRE":
                 if 200 <= mx <= 350 and 300 <= my <= 400: game.base_hp = min(game.base_max_hp, game.base_hp + 30); game.mode = "MAP"
@@ -607,7 +606,14 @@ while running:
         draw_text(screen, f"Base HP: {game.base_hp}/{game.base_max_hp}", font, GREEN, 20, 20)
         draw_text(screen, f"Gold: {game.gold}", font, GOLD, 20, 40)
         draw_text(screen, f"Wave: {game.wave}/{game.max_waves}", font, WHITE, 20, 60)
-        draw_text(screen, f"Energy: {game.energy}/{game.max_energy}", large_font, BLUE, 20, HEIGHT - 180)
+        
+        # --- UI ALIGNMENT UPDATE: Move Energy and draw Piles ---
+        draw_text(screen, f"Energy: {game.energy}/{game.max_energy}", large_font, BLUE, 20, HEIGHT - 130)
+        draw_text(screen, f"Draw Pile: {len(game.draw_pile)}", font, WHITE, 20, HEIGHT - 80)
+        
+        draw_text(screen, f"Discard: {len(game.discard_pile)}", font, GRAY, WIDTH - 150, HEIGHT - 130)
+        draw_text(screen, f"Exhaust: {len(game.exhaust_pile)}", font, ORANGE, WIDTH - 150, HEIGHT - 90)
+
         draw_passives(screen, game, mx, my)
 
         if game.tutorial_active:
@@ -655,7 +661,6 @@ while running:
                 
         if game.shop_passive: draw_item_box(screen, game.shop_passive.name, game.shop_passive.description, game.shop_passive.cost, 650, 300, 200, 80, 650 <= mx <= 850 and 300 <= my <= 380)
         
-        # Updated Shop Buttons
         pygame.draw.rect(screen, BLUE if 400 <= mx <= 600 and 500 <= my <= 545 else DARK_GRAY, (400, 500, 200, 45), border_radius=5)
         draw_text(screen, f"Refresh Shop ({game.shop_refresh_cost}g)", font, WHITE, 500, 522, center=True)
         
@@ -664,7 +669,6 @@ while running:
         
         pygame.draw.rect(screen, RED if 400 <= mx <= 600 and 610 <= my <= 655 else DARK_GRAY, (400, 610, 200, 45), border_radius=5)
         draw_text(screen, "LEAVE SHOP", font, WHITE, 500, 632, center=True)
-        
         draw_passives(screen, game, mx, my)
 
     elif game.mode == "SHOP_SELL":
