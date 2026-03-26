@@ -19,7 +19,7 @@ PINK, SLIME = (255, 105, 180), (100, 255, 100)
 
 pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Spire Defense: Elite Rewards & Previews")
+pygame.display.set_caption("Spire Defense: Tutorial & Animated Menu")
 clock = pygame.time.Clock()
 font = pygame.font.SysFont("Arial", 16, bold=True)
 large_font = pygame.font.SysFont("Arial", 32, bold=True)
@@ -81,11 +81,11 @@ class Wall:
 class Enemy:
     def __init__(self, enemy_type, hp_scale=1.0):
         self.type, self.attack_cooldown, self.flying = enemy_type, 0, False
-        if type == "BOSS": self.max_hp, self.speed, self.color, self.radius, self.reward, self.wall_dmg = 450*hp_scale, 0.5, PURPLE, 24, 50, 20
-        elif type == "ELITE": self.max_hp, self.speed, self.color, self.radius, self.reward, self.wall_dmg = 150*hp_scale, 0.7, RED, 20, 20, 15
-        elif type == "SWARM": self.max_hp, self.speed, self.color, self.radius, self.reward, self.wall_dmg = 15*hp_scale, 2.2, SLIME, 8, 2, 1
-        elif type == "TANK": self.max_hp, self.speed, self.color, self.radius, self.reward, self.wall_dmg = 100*hp_scale, 0.6, DARK_GRAY, 18, 15, 15
-        elif type == "FLYING": self.max_hp, self.speed, self.color, self.radius, self.reward, self.wall_dmg, self.flying = 30*hp_scale, 1.5, PINK, 12, 10, 0, True
+        if enemy_type == "BOSS": self.max_hp, self.speed, self.color, self.radius, self.reward, self.wall_dmg = 450*hp_scale, 0.5, PURPLE, 24, 50, 20
+        elif enemy_type == "ELITE": self.max_hp, self.speed, self.color, self.radius, self.reward, self.wall_dmg = 150*hp_scale, 0.7, RED, 20, 20, 15
+        elif enemy_type == "SWARM": self.max_hp, self.speed, self.color, self.radius, self.reward, self.wall_dmg = 15*hp_scale, 2.2, SLIME, 8, 2, 1
+        elif enemy_type == "TANK": self.max_hp, self.speed, self.color, self.radius, self.reward, self.wall_dmg = 100*hp_scale, 0.6, DARK_GRAY, 18, 15, 15
+        elif enemy_type == "FLYING": self.max_hp, self.speed, self.color, self.radius, self.reward, self.wall_dmg, self.flying = 30*hp_scale, 1.5, PINK, 12, 10, 0, True
         else: self.max_hp, self.speed, self.color, self.radius, self.reward, self.wall_dmg = 40*hp_scale, 1.0, BROWN, 14, 5, 5
             
         self.hp, self.path_index = self.max_hp, 0
@@ -105,18 +105,27 @@ class MapNode:
 
 class GameState:
     def __init__(self):
+        self.setup_menu()
+
+    def setup_menu(self):
         self.mode = "MENU"
+        self.paused = False
+        self.tutorial_active = False
+        # Animated menu background components
+        cards = get_all_cards()
+        self.towers = [Tower(2, 4, cards[0]), Tower(5, 3, cards[1]), Tower(8, 4, cards[2]), Tower(10, 4, cards[0])]
+        self.walls = {(7, 5): Wall(7, 5, 9999)} # Indestructible menu wall
+        self.enemies, self.lasers, self.explosions = [], [], []
+        self.spawn_timer = 0
+        
+        # Core game data
         self.master_deck, self.passives, self.map_tiers = [], [], []
         self.base_max_hp, self.gold, self.base_hp = 100, 50, 100
         self.current_node, self.available_next_nodes = None, []
-        
         self.draw_pile, self.discard_pile, self.hand = [], [], []
-        self.towers, self.walls, self.enemies, self.lasers, self.explosions = [], {}, [], [], []
-        
         self.max_energy, self.energy = 3, 3
         self.wave, self.max_waves, self.battle_phase = 1, 3, "PLANNING"
-        self.spawn_timer, self.enemies_to_spawn = 0, []
-        
+        self.enemies_to_spawn = []
         self.shop_cards, self.shop_passive, self.shop_refresh_cost = [], None, 10
         self.reward_choices, self.elite_passive_choices = [], []
         self.reward_card_picked, self.reward_passive_picked = False, False
@@ -129,12 +138,12 @@ class GameState:
     def generate_map(self):
         self.map_tiers = []
         for t in range(5):
-            num_nodes = random.randint(4, 6) # INCREASED NODES PER ROW
+            num_nodes = random.randint(4, 6)
             tier_nodes = []
             for n in range(num_nodes):
                 x = WIDTH // 2 + (n - (num_nodes-1)/2) * 120 + random.randint(-15, 15)
                 y = HEIGHT - 100 - t * 100
-                type = 'BATTLE' if t == 0 else random.choices(['BATTLE', 'ELITE', 'SHOP', 'CAMPFIRE'], weights=[45, 20, 20, 15])[0]
+                type = 'TUTORIAL' if t == 0 else random.choices(['BATTLE', 'ELITE', 'SHOP', 'CAMPFIRE'], weights=[45, 20, 20, 15])[0]
                 tier_nodes.append(MapNode(x, y, type, t))
             self.map_tiers.append(tier_nodes)
         self.map_tiers.append([MapNode(WIDTH//2, 80, 'BOSS', 5)])
@@ -159,22 +168,18 @@ class GameState:
     def select_node(self, node):
         self.current_node = node
         self.available_next_nodes = node.connections
-        if node.type in ['BATTLE', 'ELITE', 'BOSS']: self.enter_battle(node.type)
-        elif node.type == 'SHOP': self.generate_shop(); self.mode = "SHOP"
+        if node.type in ['BATTLE', 'TUTORIAL', 'ELITE', 'BOSS']: self.enter_battle(node.type)
+        elif node.type == 'SHOP': self.shop_refresh_cost = 10; self.refresh_shop_items(); self.mode = "SHOP"
         else: self.mode = node.type
 
     def refresh_shop_items(self):
         self.shop_cards = []
         for c in random.sample(get_all_cards(), 3):
-            clone = c.clone()
+            clone = c.clone(); 
             if random.random() < 0.25: clone.upgrade()
             self.shop_cards.append(clone)
         avail = [p for p in get_all_passives() if p.id not in self.passives]
         self.shop_passive = random.choice(avail) if avail else None
-
-    def generate_shop(self):
-        self.shop_refresh_cost = 10
-        self.refresh_shop_items()
 
     def add_passive(self, passive_id):
         self.passives.append(passive_id)
@@ -184,6 +189,7 @@ class GameState:
     def enter_battle(self, encounter_type):
         self.towers.clear(); self.walls.clear(); self.enemies.clear(); self.explosions.clear()
         self.wave, self.max_waves = 1, (4 if encounter_type == 'ELITE' else 3)
+        self.tutorial_active = (encounter_type == 'TUTORIAL')
         self.draw_pile = [c.clone() for c in self.master_deck]
         random.shuffle(self.draw_pile)
         self.discard_pile.clear(); self.hand.clear()
@@ -193,40 +199,43 @@ class GameState:
     def draw_cards(self, amount):
         for _ in range(amount):
             if not self.draw_pile:
-                self.draw_pile = list(self.discard_pile)
-                random.shuffle(self.draw_pile)
-                self.discard_pile.clear()
+                self.draw_pile = list(self.discard_pile); random.shuffle(self.draw_pile); self.discard_pile.clear()
             if self.draw_pile: self.hand.append(self.draw_pile.pop(0))
 
     def start_turn(self):
         self.battle_phase, self.energy = "PLANNING", self.max_energy
-        self.discard_pile.extend(self.hand); self.hand.clear()
-        self.draw_cards(5)
-        
-        hp_scale = 1.0 + (self.current_node.tier * 0.2)
-        count = 4 + self.wave * 2
+        self.discard_pile.extend(self.hand); self.hand.clear(); self.draw_cards(5)
         self.enemies_to_spawn = []
         
+        # Difficulty Scaling
+        if self.tutorial_active:
+            hp_scale = 0.5
+            if self.wave == 1: self.enemies_to_spawn = [Enemy("NORMAL", hp_scale) for _ in range(3)]
+            elif self.wave == 2: self.enemies_to_spawn = [Enemy("NORMAL", hp_scale) for _ in range(5)]
+            else: self.enemies_to_spawn = [Enemy("TANK", hp_scale)] + [Enemy("NORMAL", hp_scale) for _ in range(2)]
+            return
+
+        hp_scale = 0.8 + (self.current_node.tier * 0.25)
+        count = 3 + self.wave * 2 + (self.current_node.tier)
+
         if self.current_node.type == 'BOSS' and self.wave == 3:
             self.enemies_to_spawn.append(Enemy("BOSS", hp_scale))
             self.enemies_to_spawn.extend([Enemy("TANK", hp_scale), Enemy("FLYING", hp_scale)])
         elif self.current_node.type == 'ELITE':
-            # ELITE ENCOUNTERS: Only Special Enemies
             if self.wave == 4:
                 self.enemies_to_spawn.append(Enemy("ELITE", hp_scale))
                 for _ in range(3): self.enemies_to_spawn.append(random.choice([Enemy("TANK", hp_scale), Enemy("FLYING", hp_scale)]))
             else:
-                for _ in range(count - 1): # Slightly fewer, but much tougher enemies
+                for _ in range(count - 2):
                     etype = random.choices(["SWARM", "TANK", "FLYING"], weights=[40, 30, 30])[0]
                     self.enemies_to_spawn.append(Enemy(etype, hp_scale))
-                    if etype == "SWARM": self.enemies_to_spawn.append(Enemy("SWARM", hp_scale)) # Swarms come in pairs
+                    if etype == "SWARM": self.enemies_to_spawn.append(Enemy("SWARM", hp_scale))
         else:
-            # NORMAL ENCOUNTERS
             for _ in range(count):
                 roll = random.random()
-                if roll < 0.5: self.enemies_to_spawn.append(Enemy("NORMAL", hp_scale))
-                elif roll < 0.7: self.enemies_to_spawn.extend([Enemy("SWARM", hp_scale), Enemy("SWARM", hp_scale)])
-                elif roll < 0.85: self.enemies_to_spawn.append(Enemy("TANK", hp_scale))
+                if roll < 0.6: self.enemies_to_spawn.append(Enemy("NORMAL", hp_scale))
+                elif roll < 0.75: self.enemies_to_spawn.extend([Enemy("SWARM", hp_scale), Enemy("SWARM", hp_scale)])
+                elif roll < 0.9: self.enemies_to_spawn.append(Enemy("TANK", hp_scale))
                 else: self.enemies_to_spawn.append(Enemy("FLYING", hp_scale))
 
     def play_card(self, card, gx, gy):
@@ -243,76 +252,89 @@ class GameState:
         self.energy -= card.cost; self.hand.remove(card); self.discard_pile.append(card)
         return True
 
-    def generate_elite_rewards(self):
-        self.reward_choices = []
-        for c in random.sample(get_all_cards(), 3):
-            clone = c.clone(); clone.upgrade(); self.reward_choices.append(clone)
-        avail = [p for p in get_all_passives() if p.id not in self.passives]
-        self.elite_passive_choices = random.sample(avail, min(3, len(avail)))
-        self.reward_card_picked, self.reward_passive_picked = False, False
+    def _simulate_entities(self, is_menu=False):
+        """Shared logic for moving enemies and firing towers for both Battle and Menu"""
+        for e in self.enemies[:]:
+            blocked = False
+            if not e.flying and e.path_index < len(PATH) - 1:
+                nx, ny = PATH[e.path_index + 1]
+                if (nx, ny) in self.walls:
+                    blocked = True
+                    if e.attack_cooldown <= 0:
+                        self.walls[(nx, ny)].hp -= e.wall_dmg
+                        e.attack_cooldown = 60
+                        if self.walls[(nx, ny)].hp <= 0: del self.walls[(nx, ny)]
+                    else: e.attack_cooldown -= 1
+            
+            reached_end = False
+            if not blocked:
+                if e.path_index < len(PATH) - 1:
+                    tx, ty = MAP_OFFSET_X + PATH[e.path_index + 1][0] * GRID_SIZE + GRID_SIZE//2, MAP_OFFSET_Y + PATH[e.path_index + 1][1] * GRID_SIZE + GRID_SIZE//2
+                    dist = math.hypot(tx - e.x, ty - e.y)
+                    if dist < e.speed: e.x, e.y = tx, ty; e.path_index += 1
+                    else: e.x += ((tx - e.x) / dist) * e.speed; e.y += ((ty - e.y) / dist) * e.speed
+                else: reached_end = True
+
+            if e.hp <= 0:
+                if not is_menu: self.gold += e.reward
+                self.enemies.remove(e)
+            elif reached_end:
+                if not is_menu:
+                    self.base_hp -= (15 if e.type in ['BOSS', 'ELITE'] else 5)
+                    if self.base_hp <= 0: self.mode = "GAMEOVER"
+                self.enemies.remove(e)
+        
+        self.lasers.clear()
+        bonus_dmg = 5 if "DMG_1" in self.passives and not is_menu else 0
+        for t in self.towers:
+            if t.cooldown > 0: t.cooldown -= 1
+            if t.cooldown <= 0:
+                in_range = [e for e in self.enemies if math.hypot(e.x - t.x, e.y - t.y) <= t.template.range]
+                if in_range:
+                    target = in_range[0]
+                    total_dmg = t.template.damage + bonus_dmg
+                    if t.template.aoe_radius > 0:
+                        self.explosions.append([target.x, target.y, t.template.aoe_radius, 15])
+                        for splash_target in self.enemies:
+                            if math.hypot(splash_target.x - target.x, splash_target.y - target.y) <= t.template.aoe_radius:
+                                splash_target.hp -= total_dmg
+                    else:
+                        target.hp -= total_dmg; self.lasers.append((t.x, t.y, target.x, target.y))
+                    t.cooldown = t.template.fire_rate
+                    
+        for e in self.enemies[:]:
+            if e.hp <= 0:
+                if not is_menu: self.gold += e.reward
+                if e in self.enemies: self.enemies.remove(e)
+
+    def update_menu(self):
+        self.spawn_timer -= 1
+        if self.spawn_timer <= 0:
+            self.enemies.append(Enemy(random.choice(["NORMAL", "SWARM", "TANK", "FLYING"]), 1.0))
+            self.spawn_timer = 45
+        self._simulate_entities(is_menu=True)
 
     def update_battle(self):
+        if self.paused: return
         if self.battle_phase == "ACTION":
             if self.enemies_to_spawn:
                 self.spawn_timer -= 1
                 if self.spawn_timer <= 0:
                     self.enemies.append(self.enemies_to_spawn.pop(0))
-                    self.spawn_timer = 25 # slightly faster spawn rate
+                    self.spawn_timer = 30
             
-            for e in self.enemies[:]:
-                blocked = False
-                if not e.flying and e.path_index < len(PATH) - 1:
-                    nx, ny = PATH[e.path_index + 1]
-                    if (nx, ny) in self.walls:
-                        blocked = True
-                        if e.attack_cooldown <= 0:
-                            self.walls[(nx, ny)].hp -= e.wall_dmg
-                            e.attack_cooldown = 60
-                            if self.walls[(nx, ny)].hp <= 0: del self.walls[(nx, ny)]
-                        else: e.attack_cooldown -= 1
-                
-                reached_end = False
-                if not blocked:
-                    if e.path_index < len(PATH) - 1:
-                        tx, ty = MAP_OFFSET_X + PATH[e.path_index + 1][0] * GRID_SIZE + GRID_SIZE//2, MAP_OFFSET_Y + PATH[e.path_index + 1][1] * GRID_SIZE + GRID_SIZE//2
-                        dist = math.hypot(tx - e.x, ty - e.y)
-                        if dist < e.speed: e.x, e.y = tx, ty; e.path_index += 1
-                        else: e.x += ((tx - e.x) / dist) * e.speed; e.y += ((ty - e.y) / dist) * e.speed
-                    else: reached_end = True
-
-                if e.hp <= 0:
-                    self.gold += e.reward; self.enemies.remove(e)
-                elif reached_end:
-                    self.base_hp -= (15 if e.type in ['BOSS', 'ELITE'] else 5); self.enemies.remove(e)
-                    if self.base_hp <= 0: self.mode = "GAMEOVER"
-            
-            self.lasers.clear()
-            bonus_dmg = 5 if "DMG_1" in self.passives else 0
-            for t in self.towers:
-                if t.cooldown > 0: t.cooldown -= 1
-                if t.cooldown <= 0:
-                    in_range = [e for e in self.enemies if math.hypot(e.x - t.x, e.y - t.y) <= t.template.range]
-                    if in_range:
-                        target = in_range[0]
-                        total_dmg = t.template.damage + bonus_dmg
-                        if t.template.aoe_radius > 0:
-                            self.explosions.append([target.x, target.y, t.template.aoe_radius, 15])
-                            for splash_target in self.enemies:
-                                if math.hypot(splash_target.x - target.x, splash_target.y - target.y) <= t.template.aoe_radius:
-                                    splash_target.hp -= total_dmg
-                        else:
-                            target.hp -= total_dmg; self.lasers.append((t.x, t.y, target.x, target.y))
-                        t.cooldown = t.template.fire_rate
-
-            for e in self.enemies[:]:
-                if e.hp <= 0: self.gold += e.reward; self.enemies.remove(e)
+            self._simulate_entities(is_menu=False)
 
             if not self.enemies and not self.enemies_to_spawn:
                 if self.wave >= self.max_waves:
                     if "GOLD_1" in self.passives: self.gold += 20
                     if self.current_node.type == 'BOSS': self.mode = "WIN"
                     elif self.current_node.type == 'ELITE':
-                        self.generate_elite_rewards()
+                        self.reward_choices = [c.clone() for c in random.sample(get_all_cards(), 3)]
+                        for c in self.reward_choices: c.upgrade()
+                        avail = [p for p in get_all_passives() if p.id not in self.passives]
+                        self.elite_passive_choices = random.sample(avail, min(3, len(avail)))
+                        self.reward_card_picked, self.reward_passive_picked = False, False
                         self.mode = "ELITE_REWARD"
                     else:
                         self.reward_choices = random.sample(get_all_cards(), 3)
@@ -368,6 +390,38 @@ def draw_passives(surf, game, mx, my):
         draw_text(surf, tooltip[0], font, GOLD, tooltip[2]+10, tooltip[3]+5)
         draw_text(surf, tooltip[1], font, WHITE, tooltip[2]+10, tooltip[3]+25)
 
+def draw_grid_and_entities(surf, game):
+    for r in range(ROWS):
+        for c in range(COLS):
+            rect = pygame.Rect(MAP_OFFSET_X + c*GRID_SIZE, MAP_OFFSET_Y + r*GRID_SIZE, GRID_SIZE, GRID_SIZE)
+            if (c, r) in PATH: pygame.draw.rect(surf, (100, 80, 60), rect)
+            else: pygame.draw.rect(surf, (60, 140, 60), rect); pygame.draw.rect(surf, (50, 120, 50), rect, 1)
+
+    bx, by = MAP_OFFSET_X + PATH[-1][0]*GRID_SIZE, MAP_OFFSET_Y + PATH[-1][1]*GRID_SIZE
+    pygame.draw.rect(surf, DARK_GRAY, (bx, by-20, GRID_SIZE, GRID_SIZE+20))
+    draw_text(surf, "BASE", font, WHITE, bx+GRID_SIZE//2, by, center=True)
+
+    for (gx, gy), wall in game.walls.items():
+        pygame.draw.rect(surf, BROWN, (MAP_OFFSET_X + gx*GRID_SIZE+5, MAP_OFFSET_Y + gy*GRID_SIZE+5, 40, 40))
+        if game.mode != "MENU": draw_text(surf, str(wall.hp), font, WHITE, MAP_OFFSET_X + gx*GRID_SIZE+25, MAP_OFFSET_Y + gy*GRID_SIZE+25, center=True)
+        
+    for t in game.towers:
+        color = ORANGE if "Bomber" in t.template.name else (CYAN if "Ice" in t.template.name else (DARK_GRAY if "Cannon" in t.template.name else BLUE))
+        pygame.draw.circle(surf, color, (t.x, t.y), 20); pygame.draw.circle(surf, BLACK, (t.x, t.y), 20, 2)
+        
+    for e in game.enemies:
+        pygame.draw.circle(surf, e.color, (int(e.x), int(e.y)), e.radius)
+        if e.flying: pygame.draw.circle(surf, WHITE, (int(e.x), int(e.y)), e.radius+2, 1)
+        if game.mode != "MENU":
+            pygame.draw.rect(surf, RED, (e.x-15, e.y-20, 30, 5))
+            pygame.draw.rect(surf, GREEN, (e.x-15, e.y-20, 30 * (e.hp/e.max_hp), 5))
+        
+    for lx1, ly1, lx2, ly2 in game.lasers: pygame.draw.line(surf, GOLD, (lx1, ly1), (lx2, ly2), 3)
+    for ex in game.explosions[:]:
+        pygame.draw.circle(surf, ORANGE, (int(ex[0]), int(ex[1])), ex[2], 3)
+        ex[3] -= 1; 
+        if ex[3] <= 0: game.explosions.remove(ex)
+
 # --- MAIN LOOP ---
 
 game = GameState()
@@ -379,7 +433,19 @@ while running:
     
     for event in pygame.event.get():
         if event.type == pygame.QUIT: running = False
+        
+        # KEYBOARD EVENTS (PAUSE)
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE and game.mode in ["BATTLE", "MAP"]:
+                game.paused = not game.paused
+
+        # MOUSE EVENTS
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if game.paused:
+                if WIDTH//2 - 100 <= mx <= WIDTH//2 + 100 and HEIGHT//2 - 30 <= my <= HEIGHT//2 + 20: game.paused = False # Resume
+                if WIDTH//2 - 100 <= mx <= WIDTH//2 + 100 and HEIGHT//2 + 40 <= my <= HEIGHT//2 + 90: game.setup_menu() # Quit to menu
+                continue # Skip other clicks while paused
+
             if game.mode == "MENU": game.start_run()
             elif game.mode == "MAP":
                 for node in game.available_next_nodes:
@@ -399,20 +465,13 @@ while running:
                         game.master_deck.append(card.clone()); game.mode = "MAP"
             
             elif game.mode == "ELITE_REWARD":
-                if WIDTH//2-100 <= mx <= WIDTH//2+100 and 600 <= my <= 640: game.mode = "MAP" # Skip/Continue
-                
-                # Pick Card
+                if WIDTH//2-100 <= mx <= WIDTH//2+100 and 600 <= my <= 640: game.mode = "MAP"
                 if not game.reward_card_picked:
                     for i, card in enumerate(game.reward_choices):
-                        if 150+i*150 <= mx <= 150+i*150+120 and 200 <= my <= 360:
-                            game.master_deck.append(card.clone()); game.reward_card_picked = True
-                
-                # Pick Passive
+                        if 150+i*150 <= mx <= 150+i*150+120 and 200 <= my <= 360: game.master_deck.append(card.clone()); game.reward_card_picked = True
                 if not game.reward_passive_picked:
                     for i, passive in enumerate(game.elite_passive_choices):
-                        if 650 <= mx <= 850 and 200+i*100 <= my <= 280+i*100:
-                            game.add_passive(passive.id); game.reward_passive_picked = True
-                            
+                        if 650 <= mx <= 850 and 200+i*100 <= my <= 280+i*100: game.add_passive(passive.id); game.reward_passive_picked = True
                 if game.reward_card_picked and game.reward_passive_picked: game.mode = "MAP"
 
             elif game.mode == "SHOP":
@@ -435,7 +494,7 @@ while running:
                         cx, cy = 20 + (i%6)*130, 150 + (i//6)*170
                         if cx <= mx <= cx+120 and cy <= my <= cy+160: card.upgrade(); game.mode = "MAP"; break
 
-            elif game.mode in ["GAMEOVER", "WIN"]: game = GameState()
+            elif game.mode in ["GAMEOVER", "WIN"]: game.setup_menu()
                 
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             if game.dragging_card:
@@ -444,14 +503,19 @@ while running:
                     game.play_card(game.dragging_card, gx, gy)
                 game.dragging_card = None
 
-    # --- UPDATE & DRAW ---
+    # --- UPDATE ---
     if game.mode == "BATTLE": game.update_battle()
+    elif game.mode == "MENU": game.update_menu()
 
+    # --- DRAW ---
     screen.fill((30, 30, 40))
 
     if game.mode == "MENU":
-        draw_text(screen, "SPIRE DEFENSE", large_font, WHITE, WIDTH//2, HEIGHT//3, center=True)
-        draw_text(screen, "Click anywhere to start", font, GRAY, WIDTH//2, HEIGHT//2, center=True)
+        draw_grid_and_entities(screen, game)
+        # Dark Overlay for Menu text
+        overlay = pygame.Surface((WIDTH, HEIGHT)); overlay.set_alpha(150); overlay.fill(BLACK); screen.blit(overlay, (0,0))
+        draw_text(screen, "SPIRE DEFENSE", pygame.font.SysFont("Arial", 60, bold=True), GOLD, WIDTH//2, HEIGHT//3, center=True)
+        draw_text(screen, "Click anywhere to start", large_font, WHITE, WIDTH//2, HEIGHT//2, center=True)
         
     elif game.mode == "MAP":
         draw_text(screen, f"HP: {game.base_hp}/{game.base_max_hp} | Gold: {game.gold}", large_font, WHITE, WIDTH//2, 70, center=True)
@@ -464,55 +528,34 @@ while running:
                 color = GREEN if node in game.available_next_nodes else (GOLD if node == game.current_node else GRAY)
                 pygame.draw.circle(screen, color, (node.x, node.y), 20)
                 icon = "B"
-                if node.type == 'ELITE': icon = "E"; pygame.draw.circle(screen, RED, (node.x, node.y), 20, 3)
+                if node.type == 'TUTORIAL': icon = "T"; pygame.draw.circle(screen, BLUE, (node.x, node.y), 20, 3)
+                elif node.type == 'ELITE': icon = "E"; pygame.draw.circle(screen, RED, (node.x, node.y), 20, 3)
                 elif node.type == 'SHOP': icon = "$"
                 elif node.type == 'CAMPFIRE': icon = "R"
                 elif node.type == 'BOSS': icon = "BOSS"
                 draw_text(screen, icon, font, BLACK, node.x, node.y, center=True)
 
     elif game.mode == "BATTLE":
-        for r in range(ROWS):
-            for c in range(COLS):
-                rect = pygame.Rect(MAP_OFFSET_X + c*GRID_SIZE, MAP_OFFSET_Y + r*GRID_SIZE, GRID_SIZE, GRID_SIZE)
-                if (c, r) in PATH: pygame.draw.rect(screen, (100, 80, 60), rect)
-                else: pygame.draw.rect(screen, (60, 140, 60), rect); pygame.draw.rect(screen, (50, 120, 50), rect, 1)
-
-        bx, by = MAP_OFFSET_X + PATH[-1][0]*GRID_SIZE, MAP_OFFSET_Y + PATH[-1][1]*GRID_SIZE
-        pygame.draw.rect(screen, DARK_GRAY, (bx, by-20, GRID_SIZE, GRID_SIZE+20))
-        draw_text(screen, "BASE", font, WHITE, bx+GRID_SIZE//2, by, center=True)
-
-        for (gx, gy), wall in game.walls.items():
-            pygame.draw.rect(screen, BROWN, (MAP_OFFSET_X + gx*GRID_SIZE+5, MAP_OFFSET_Y + gy*GRID_SIZE+5, 40, 40))
-            draw_text(screen, str(wall.hp), font, WHITE, MAP_OFFSET_X + gx*GRID_SIZE+25, MAP_OFFSET_Y + gy*GRID_SIZE+25, center=True)
-            
-        for t in game.towers:
-            color = ORANGE if "Bomber" in t.template.name else (CYAN if "Ice" in t.template.name else (DARK_GRAY if "Cannon" in t.template.name else BLUE))
-            pygame.draw.circle(screen, color, (t.x, t.y), 20)
-            pygame.draw.circle(screen, BLACK, (t.x, t.y), 20, 2)
-            
-        for e in game.enemies:
-            pygame.draw.circle(screen, e.color, (int(e.x), int(e.y)), e.radius)
-            if e.flying: pygame.draw.circle(screen, WHITE, (int(e.x), int(e.y)), e.radius+2, 1)
-            pygame.draw.rect(screen, RED, (e.x-15, e.y-20, 30, 5))
-            pygame.draw.rect(screen, GREEN, (e.x-15, e.y-20, 30 * (e.hp/e.max_hp), 5))
-            
-        for lx1, ly1, lx2, ly2 in game.lasers: pygame.draw.line(screen, GOLD, (lx1, ly1), (lx2, ly2), 3)
-        for ex in game.explosions[:]:
-            pygame.draw.circle(screen, ORANGE, (int(ex[0]), int(ex[1])), ex[2], 3)
-            ex[3] -= 1
-            if ex[3] <= 0: game.explosions.remove(ex)
-
+        draw_grid_and_entities(screen, game)
         draw_text(screen, f"Base HP: {game.base_hp}/{game.base_max_hp}", font, GREEN, 20, 20)
         draw_text(screen, f"Gold: {game.gold}", font, GOLD, 20, 40)
         draw_text(screen, f"Wave: {game.wave}/{game.max_waves}", font, WHITE, 20, 60)
         draw_text(screen, f"Energy: {game.energy}/{game.max_energy}", large_font, BLUE, 20, HEIGHT - 180)
         draw_passives(screen, game, mx, my)
 
+        # NARRATOR TUTORIAL
+        if game.tutorial_active:
+            pygame.draw.rect(screen, DARK_GRAY, (WIDTH//2 - 350, 20, 700, 60), border_radius=10)
+            pygame.draw.rect(screen, GOLD, (WIDTH//2 - 350, 20, 700, 60), 2, border_radius=10)
+            draw_text(screen, "NARRATOR:", font, GOLD, WIDTH//2 - 330, 30)
+            if game.battle_phase == "PLANNING": msg = "Drag cards from your hand to the green grass to build defenses. Click 'Start Wave' when ready!"
+            else: msg = "Watch your towers defend the base! Enemies follow the dirt path. If they reach the end, you lose HP."
+            draw_text(screen, msg, font, WHITE, WIDTH//2 - 330, 50)
+
         if game.battle_phase == "PLANNING":
             pygame.draw.rect(screen, GREEN, (WIDTH-150, 20, 130, 40), border_radius=5)
             draw_text(screen, "Start Wave", font, BLACK, WIDTH-140, 30)
             
-            # --- WAVE PREVIEW ---
             preview_counts = {}
             for e in game.enemies_to_spawn: preview_counts[e.type] = preview_counts.get(e.type, 0) + 1
             draw_text(screen, "INCOMING WAVE:", font, RED, WIDTH-140, 80)
@@ -527,22 +570,15 @@ while running:
 
     elif game.mode == "ELITE_REWARD":
         draw_text(screen, "ELITE DEFEATED! CHOOSE 1 CARD & 1 PASSIVE", large_font, GOLD, WIDTH//2, 80, center=True)
-        
-        # Draw Cards
         if not game.reward_card_picked:
             draw_text(screen, "CHOOSE 1 UPGRADED CARD", font, WHITE, 350, 160, center=True)
-            for i, card in enumerate(game.reward_choices):
-                draw_card(screen, card, 150 + i * 150, 200, (150+i*150 <= mx <= 150+i*150+120 and 200 <= my <= 360))
+            for i, card in enumerate(game.reward_choices): draw_card(screen, card, 150 + i * 150, 200, (150+i*150 <= mx <= 150+i*150+120 and 200 <= my <= 360))
         else: draw_text(screen, "CARD SELECTED", large_font, GREEN, 350, 250, center=True)
-                
-        # Draw Passives
         if not game.reward_passive_picked:
             draw_text(screen, "CHOOSE 1 PASSIVE", font, WHITE, 750, 160, center=True)
             for i, passive in enumerate(game.elite_passive_choices):
-                is_hover = 650 <= mx <= 850 and 200+i*100 <= my <= 280+i*100
-                draw_item_box(screen, passive.name, passive.description, 0, 650, 200+i*100, 200, 80, is_hover, show_cost=False)
+                draw_item_box(screen, passive.name, passive.description, 0, 650, 200+i*100, 200, 80, 650 <= mx <= 850 and 200+i*100 <= my <= 280+i*100, show_cost=False)
         else: draw_text(screen, "PASSIVE SELECTED", large_font, GREEN, 750, 250, center=True)
-            
         pygame.draw.rect(screen, GRAY, (WIDTH//2-100, 600, 200, 40), border_radius=5)
         draw_text(screen, "CONTINUE / SKIP", font, BLACK, WIDTH//2, 620, center=True)
 
@@ -550,8 +586,7 @@ while running:
         draw_text(screen, f"SHOP - Gold: {game.gold}", large_font, GOLD, WIDTH//2, 100, center=True)
         for i, card in enumerate(game.shop_cards):
             if card: draw_card(screen, card, 150 + i * 150, 300, (150+i*150 <= mx <= 150+i*150+120 and 300 <= my <= 460))
-        if game.shop_passive:
-            draw_item_box(screen, game.shop_passive.name, game.shop_passive.description, game.shop_passive.cost, 650, 300, 200, 80, 650 <= mx <= 850 and 300 <= my <= 380)
+        if game.shop_passive: draw_item_box(screen, game.shop_passive.name, game.shop_passive.description, game.shop_passive.cost, 650, 300, 200, 80, 650 <= mx <= 850 and 300 <= my <= 380)
         pygame.draw.rect(screen, BLUE if 400 <= mx <= 600 and 520 <= my <= 570 else DARK_GRAY, (400, 520, 200, 50), border_radius=5)
         draw_text(screen, f"Refresh Shop ({game.shop_refresh_cost}g)", font, WHITE, 500, 545, center=True)
         pygame.draw.rect(screen, RED, (400, 600, 200, 50), border_radius=5)
@@ -581,14 +616,26 @@ while running:
 
     elif game.mode == "REWARD":
         draw_text(screen, "VICTORY! CHOOSE A REWARD", large_font, WHITE, WIDTH//2, 100, center=True)
-        for i, card in enumerate(game.reward_choices):
-            draw_card(screen, card, 300 + i * 150, 300, (300+i*150 <= mx <= 300+i*150+120 and 300 <= my <= 460))
+        for i, card in enumerate(game.reward_choices): draw_card(screen, card, 300 + i * 150, 300, (300+i*150 <= mx <= 300+i*150+120 and 300 <= my <= 460))
         pygame.draw.rect(screen, GRAY, (WIDTH//2-50, 550, 100, 40), border_radius=5)
         draw_text(screen, "SKIP", font, BLACK, WIDTH//2, 570, center=True)
 
     elif game.mode in ["GAMEOVER", "WIN"]:
         draw_text(screen, "GAME OVER" if game.mode == "GAMEOVER" else "YOU DEFENDED THE SPIRE!", large_font, RED if game.mode == "GAMEOVER" else GREEN, WIDTH//2, HEIGHT//2, center=True)
         draw_text(screen, "Click to restart", font, WHITE, WIDTH//2, HEIGHT//2 + 50, center=True)
+
+    # --- PAUSE OVERLAY ---
+    if game.paused:
+        overlay = pygame.Surface((WIDTH, HEIGHT)); overlay.set_alpha(180); overlay.fill(BLACK); screen.blit(overlay, (0,0))
+        draw_text(screen, "PAUSED", pygame.font.SysFont("Arial", 50, bold=True), WHITE, WIDTH//2, HEIGHT//3, center=True)
+        
+        resume_hover = WIDTH//2 - 100 <= mx <= WIDTH//2 + 100 and HEIGHT//2 - 30 <= my <= HEIGHT//2 + 20
+        pygame.draw.rect(screen, BLUE if resume_hover else DARK_GRAY, (WIDTH//2 - 100, HEIGHT//2 - 30, 200, 50), border_radius=5)
+        draw_text(screen, "Resume", large_font, WHITE, WIDTH//2, HEIGHT//2 - 5, center=True)
+        
+        quit_hover = WIDTH//2 - 100 <= mx <= WIDTH//2 + 100 and HEIGHT//2 + 40 <= my <= HEIGHT//2 + 90
+        pygame.draw.rect(screen, RED if quit_hover else DARK_GRAY, (WIDTH//2 - 100, HEIGHT//2 + 40, 200, 50), border_radius=5)
+        draw_text(screen, "Quit to Menu", large_font, WHITE, WIDTH//2, HEIGHT//2 + 65, center=True)
 
     pygame.display.flip()
     clock.tick(FPS)
