@@ -19,7 +19,7 @@ PINK, SLIME = (255, 105, 180), (100, 255, 100)
 
 pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Spire Defense: Lethal Bosses & Interactive Tutorial")
+pygame.display.set_caption("Spire Defense: Lethal Bosses & Massive Swarms")
 clock = pygame.time.Clock()
 font = pygame.font.SysFont("Arial", 16, bold=True)
 large_font = pygame.font.SysFont("Arial", 32, bold=True)
@@ -213,6 +213,7 @@ class GameState:
         self.discard_pile.extend(self.hand); self.hand.clear(); self.draw_cards(5)
         self.enemies_to_spawn = []
         
+        # Difficulty Scaling
         if self.tutorial_active:
             hp_scale = 0.5
             if self.wave == 1: self.enemies_to_spawn = [Enemy("NORMAL", hp_scale) for _ in range(3)]
@@ -223,15 +224,29 @@ class GameState:
         hp_scale = 0.8 + (self.current_node.tier * 0.25)
         count = 3 + self.wave * 2 + (self.current_node.tier)
 
-        if self.current_node.type == 'BOSS' and self.wave == 3:
-            self.enemies_to_spawn.append(Enemy("BOSS", hp_scale))
-            self.enemies_to_spawn.extend([Enemy("TANK", hp_scale), Enemy("FLYING", hp_scale)])
-        elif self.current_node.type == 'ELITE':
-            if self.wave == 4:
-                self.enemies_to_spawn.append(Enemy("ELITE", hp_scale))
-                for _ in range(3): self.enemies_to_spawn.append(random.choice([Enemy("TANK", hp_scale), Enemy("FLYING", hp_scale)]))
+        # INCREASE SPAWNS FOR ELITE AND BOSS WAVES 2 AND 3
+        if self.current_node.type in ['ELITE', 'BOSS'] and self.wave in [2, 3]:
+            count += 4 
+
+        if self.current_node.type == 'BOSS':
+            if self.wave == 3:
+                self.enemies_to_spawn.append(Enemy("BOSS", hp_scale))
+                # Spawn massive final wave alongside the boss
+                for _ in range(count):
+                    etype = random.choices(["SWARM", "TANK", "FLYING"], weights=[30, 40, 30])[0]
+                    self.enemies_to_spawn.append(Enemy(etype, hp_scale))
             else:
-                for _ in range(count - 2):
+                for _ in range(count):
+                    etype = random.choices(["SWARM", "TANK", "FLYING"], weights=[40, 30, 30])[0]
+                    self.enemies_to_spawn.append(Enemy(etype, hp_scale))
+                    if etype == "SWARM": self.enemies_to_spawn.append(Enemy("SWARM", hp_scale))
+                    
+        elif self.current_node.type == 'ELITE':
+            if self.wave == 4: # Final wave of Elite is just the mini-boss and some escorts
+                self.enemies_to_spawn.append(Enemy("ELITE", hp_scale))
+                for _ in range(count // 2): self.enemies_to_spawn.append(random.choice([Enemy("TANK", hp_scale), Enemy("FLYING", hp_scale)]))
+            else:
+                for _ in range(count):
                     etype = random.choices(["SWARM", "TANK", "FLYING"], weights=[40, 30, 30])[0]
                     self.enemies_to_spawn.append(Enemy(etype, hp_scale))
                     if etype == "SWARM": self.enemies_to_spawn.append(Enemy("SWARM", hp_scale))
@@ -284,14 +299,14 @@ class GameState:
                 self.enemies.remove(e)
             elif reached_end:
                 if not is_menu:
-                    # NEW MECHANIC: Boss Instant Kill & Elite Double Damage
+                    # INSTANT BOSS KILL & DOUBLE ELITE NODE DAMAGE
                     if e.type == 'BOSS':
                         self.base_hp = 0
                         self.mode = "GAMEOVER"
                     else:
                         dmg = 15 if e.type == 'ELITE' else 5
-                        if self.current_node and self.current_node.type == 'ELITE':
-                            dmg *= 2 # Double damage during Elite encounters!
+                        if self.current_node and self.current_node.type in ['ELITE', 'BOSS']:
+                            dmg *= 2 # Double damage applied during Boss and Elite encounters
                         
                         self.base_hp -= dmg
                         if self.base_hp <= 0: self.mode = "GAMEOVER"
@@ -452,7 +467,6 @@ while running:
             if event.key == pygame.K_ESCAPE and game.mode in ["BATTLE", "MAP"]:
                 game.paused = not game.paused
             
-            # Interactive Tutorial SPACEBAR logic
             if event.key == pygame.K_SPACE and game.mode == "BATTLE" and game.tutorial_active:
                 if game.tutorial_index < len(game.tutorial_messages) - 1:
                     game.tutorial_index += 1
@@ -559,7 +573,6 @@ while running:
         draw_text(screen, f"Energy: {game.energy}/{game.max_energy}", large_font, BLUE, 20, HEIGHT - 180)
         draw_passives(screen, game, mx, my)
 
-        # INTERACTIVE TUTORIAL DIALOGUE
         if game.tutorial_active:
             pygame.draw.rect(screen, DARK_GRAY, (WIDTH//2 - 380, 20, 760, 60), border_radius=10)
             pygame.draw.rect(screen, GOLD, (WIDTH//2 - 380, 20, 760, 60), 2, border_radius=10)
@@ -601,7 +614,6 @@ while running:
         for i, card in enumerate(game.shop_cards):
             if card: 
                 cx, cy = 150 + i * 150, 300
-                # NEW SHOP UI PRICING
                 draw_text(screen, "Cost: 50g", font, GOLD, cx+25, cy-25) 
                 draw_card(screen, card, cx, cy, (cx <= mx <= cx+120 and cy <= my <= cy+160))
                 
