@@ -106,7 +106,8 @@ class AudioManager:
 class CardTemplate:
     def __init__(self, name, cost, type, damage=0, range=0, fire_rate=0, hp=0,
                  aoe_radius=0, draw=0, energy_gain=0, exhaust=False,
-                 description="", slows=False, piercing=False, chain=0):
+                 description="", slows=False, piercing=False, chain=0,
+                 poisons=False, sticky=False):
         self.name, self.base_cost, self.cost = name, cost, cost
         self.type = type
         self.base_damage, self.damage = damage, damage
@@ -119,13 +120,16 @@ class CardTemplate:
         self.slows = slows
         self.piercing = piercing
         self.chain = chain
+        self.poisons = poisons
+        self.sticky = sticky
         self.description, self.upgraded = description, False
 
     def clone(self):
         c = CardTemplate(self.name, self.base_cost, self.type, self.base_damage,
                          self.range, self.fire_rate, self.base_hp, self.aoe_radius,
                          self.base_draw, self.base_energy_gain, self.exhaust,
-                         self.description, self.slows, self.piercing, self.chain)
+                         self.description, self.slows, self.piercing, self.chain,
+                         self.poisons, self.sticky)
         c.upgraded, c.cost, c.damage, c.hp = self.upgraded, self.cost, self.damage, self.hp
         c.draw_amount, c.energy_gain = self.draw_amount, self.energy_gain
         return c
@@ -137,9 +141,11 @@ class CardTemplate:
                 self.damage += int(self.base_damage * 0.5)
                 if self.aoe_radius > 0: self.aoe_radius += 20
                 if "Frost" in self.name: self.cost = 1; self.description = "Low damage. Slows enemies by 50%."
-                if "Sniper" in self.name: self.cost = 2; self.description = "Pierces armor. Very slow."
+                if "Sniper" in self.name: self.range += 30; self.description = "Pierces armor. Very slow."
                 if "Chain" in self.name: self.chain += 2; self.cost = 1; self.description = f"Arcs to {self.chain} nearby enemies."
-            elif self.type == "WALL": self.hp += int(self.base_hp * 2); self.description = "Blocks path. Has 150 HP."
+                if "Poison" in self.name: self.cost = 1; self.description = "Poisons target. 6 dmg/sec for 5s."
+                if "Sticky" in self.name: self.aoe_radius += 20; self.description = f"Slow cast. Nets radius {self.aoe_radius} for 6s."
+            elif self.type == "WALL": self.hp += int(self.base_hp * 0.5)
             elif self.type == "SKILL":
                 if "Repair" in self.name:
                     self.energy_gain += 1; self.cost = 0; self.description = "Heals base by 15 HP. Gain 1 Energy."
@@ -159,7 +165,9 @@ def get_all_cards():
         CardTemplate("Wooden Wall",    1, "WALL",  hp=50,  description="Blocks path. Has 50 HP."),
         CardTemplate("Repair",         1, "SKILL", description="Heals base by 15 HP."),
         CardTemplate("Quick Thinking", 0, "SKILL", draw=1,  energy_gain=1, description="Draw 1. Gain 1 Energy."),
-        CardTemplate("Brainstorm",     1, "SKILL", draw=3,  energy_gain=1, exhaust=True, description="Draw 3. Gain 1 Energy. Exhaust.")
+        CardTemplate("Brainstorm",     1, "SKILL", draw=3,  energy_gain=1, exhaust=True, description="Draw 3. Gain 1 Energy. Exhaust."),
+        CardTemplate("Poison Tower",   2, "TOWER", damage=8,  range=115, fire_rate=60,  description="Poisons target. 4 dmg/sec for 4s.", poisons=True),
+        CardTemplate("Sticky Tower",   2, "TOWER", damage=5,  range=110, fire_rate=360, aoe_radius=55, description="Slow cast. Nets a radius for 6s.", sticky=True),
     ]
 
 # --- CLASS DEFINITIONS ---
@@ -180,10 +188,17 @@ CLASS_DEFS = {
     },
     "ROGUE": {
         "name": "Rogue",
-        "color": GREEN,
+        "color": (200, 200, 80),
         "desc": "Swift and precise. Overwhelms enemies with rapid arrows and piercing shots.",
         "detail": "2x Arrow Tower, 2x Sniper Tower, 1x Repair, 1x Wooden Wall, 2x Quick Thinking, 2x Brainstorm",
         "deck_indices": [0, 0, 4, 4, 7, 6, 8, 8, 9, 9],
+    },
+    "ALCHEMIST": {
+        "name": "Alchemist",
+        "color": (100, 220, 80),
+        "desc": "Master of toxins and traps. Poisons enemies and webs groups to a crawl.",
+        "detail": "2x Poison Tower, 2x Sticky Tower, 1x Repair, 1x Wooden Wall, 2x Quick Thinking, 2x Brainstorm",
+        "deck_indices": [10, 10, 11, 11, 7, 6, 8, 8, 9, 9],
     },
 }
 
@@ -210,6 +225,8 @@ class Enemy:
         self.type, self.attack_cooldown, self.flying = enemy_type, 0, False
         self.heal_cooldown = 0
         self.slow_timer = 0
+        self.poison_timer = 0   # frames remaining of poison DOT
+        self.poison_tick  = 0   # countdown to next poison damage tick
         self.armor = 0
         self.has_split = False
         if enemy_type == "BOSS":            self.max_hp, self.speed, self.color, self.radius, self.reward, self.wall_dmg = 450*hp_scale, 0.5, PURPLE, 24, 50, 20
@@ -259,6 +276,9 @@ class GameState:
             "NARRATOR: SHIELDED enemies (blue ring) reduce all damage. Use Sniper Towers — they pierce armor!",
             "NARRATOR: SPLITTERS (orange) split into 2 Swarms when killed. Chain Lightning clears groups fast!",
             "NARRATOR: Frost Towers (Cyan) slow enemies by 50%. Pair them with Cannons for big damage!",
+            "NARRATOR: Poison Towers (Green) infect a target — dealing damage over time. Watch for the green glow!",
+            "NARRATOR: Sticky Towers cast slowly, but launch a net that slows every enemy in a radius for 6 seconds!",
+            "NARRATOR: Combine Sticky + Poison to web a group, then melt them with toxins. Deadly combo!",
             "NARRATOR: Click 'Draw / Discard' to view your deck anytime during planning.",
             "NARRATOR: Build your defenses, then click 'Start Wave' to begin. Good luck!"
         ]
@@ -287,6 +307,9 @@ class GameState:
             "SHOPKEEPER: In Endless mode, the bosses get more exotic each loop. You've been warned.",
             "SHOPKEEPER: Twin Tactics passive? Place the same towers side by side — power in numbers!",
             "SHOPKEEPER: Curses are tempting... but two at once is a gamble even I wouldn't take.",
+            "SHOPKEEPER: Poison Tower + Sticky Tower is a wicked combo. Web 'em, then watch 'em melt.",
+            "SHOPKEEPER: Sticky Tower fires slowly, but that net lasts 6 whole seconds. Patience pays!",
+            "SHOPKEEPER: Poison ignores armor... eventually. Great against those shielded brutes.",
         ]
         self.shopkeeper_index = 0
         self.shopkeeper_tip = self.shopkeeper_tips[0]
@@ -585,6 +608,13 @@ class GameState:
     def _simulate_entities(self, is_menu=False):
         for e in self.enemies[:]:
             if e.slow_timer > 0: e.slow_timer -= 1
+            # Poison DOT: ticks every 15 frames (4 dmg ~4/sec at 60fps)
+            if e.poison_timer > 0:
+                e.poison_timer -= 1
+                e.poison_tick -= 1
+                if e.poison_tick <= 0:
+                    e.hp -= 4
+                    e.poison_tick = 15
             effective_speed = e.speed * (0.5 if e.slow_timer > 0 else 1.0)
 
             blocked = False
@@ -666,7 +696,15 @@ class GameState:
                     synergy_mult = self._get_synergy_multiplier(t) if not is_menu else 1.0
                     total_dmg = int((t.template.damage + bonus_dmg) * synergy_mult)
 
-                    if t.template.aoe_radius > 0:
+                    if t.template.aoe_radius > 0 and t.template.sticky:
+                        # Sticky Tower: net explosion — slows all in radius, tiny damage
+                        self.audio.play_sfx("explode")
+                        self.explosions.append([target.x, target.y, t.template.aoe_radius, 80, "sticky"])
+                        for splash in self.enemies:
+                            if math.hypot(splash.x - target.x, splash.y - target.y) <= t.template.aoe_radius:
+                                splash.hp -= max(1, total_dmg)
+                                splash.slow_timer = 360  # 6 seconds at 60fps
+                    elif t.template.aoe_radius > 0:
                         self.audio.play_sfx("explode")
                         self.explosions.append([target.x, target.y, t.template.aoe_radius, 15])
                         for splash in self.enemies:
@@ -693,6 +731,9 @@ class GameState:
                         arm = 0 if t.template.piercing else target.armor
                         target.hp -= max(1, total_dmg - arm)
                         if t.template.slows: target.slow_timer = 90
+                        if t.template.poisons:
+                            target.poison_timer = 240  # 4 seconds at 60fps
+                            target.poison_tick  = 15
                         self.lasers.append((t.x, t.y, target.x, target.y))
                         if not is_menu: self.audio.play_sfx("shoot")
                     t.cooldown = t.template.fire_rate
@@ -894,7 +935,14 @@ def draw_grid_and_entities(surf, game):
             syng = game._get_synergy_multiplier(t)
             if syng > 1.0:
                 pygame.draw.circle(surf, (0, 255, 100), (t.x, t.y), 24, 3)
-        color = ORANGE if "Bomber" in t.template.name else (CYAN if "Frost" in t.template.name else (DARK_GRAY if "Cannon" in t.template.name else (WHITE if "Sniper" in t.template.name else (GOLD if "Chain" in t.template.name else BLUE))))
+        color = (ORANGE if "Bomber" in t.template.name else
+                 (CYAN if "Frost" in t.template.name else
+                 (DARK_GRAY if "Cannon" in t.template.name else
+                 (WHITE if "Sniper" in t.template.name else
+                 (GOLD if "Chain" in t.template.name else
+                 ((60, 200, 60) if "Poison" in t.template.name else
+                 ((100, 180, 60) if "Sticky" in t.template.name else
+                 BLUE)))))))
         pygame.draw.circle(surf, color, (t.x, t.y), 20)
         pygame.draw.circle(surf, BLACK, (t.x, t.y), 20, 2)
 
@@ -906,6 +954,11 @@ def draw_grid_and_entities(surf, game):
             slow_surf = pygame.Surface((e.radius*2, e.radius*2), pygame.SRCALPHA)
             pygame.draw.circle(slow_surf, (100, 180, 255, 100), (e.radius, e.radius), e.radius)
             surf.blit(slow_surf, (int(e.x) - e.radius, int(e.y) - e.radius))
+        if e.poison_timer > 0:
+            poison_surf = pygame.Surface((e.radius*2, e.radius*2), pygame.SRCALPHA)
+            pygame.draw.circle(poison_surf, (60, 200, 60, 130), (e.radius, e.radius), e.radius)
+            surf.blit(poison_surf, (int(e.x) - e.radius, int(e.y) - e.radius))
+            pygame.draw.circle(surf, (40, 160, 40), (int(e.x), int(e.y)), e.radius + 2, 2)
         if e.flying: pygame.draw.circle(surf, WHITE, (int(e.x), int(e.y)), e.radius+2, 1)
         if e.type == "HEALER":
             pygame.draw.circle(surf, (100, 255, 100), (int(e.x), int(e.y)), 80, 1)
@@ -921,7 +974,12 @@ def draw_grid_and_entities(surf, game):
     for lx1, ly1, lx2, ly2 in game.lasers:
         pygame.draw.line(surf, GOLD, (lx1, ly1), (lx2, ly2), 3)
     for ex in game.explosions[:]:
-        pygame.draw.circle(surf, ORANGE, (int(ex[0]), int(ex[1])), ex[2], 3)
+        ex_color = (80, 220, 80) if len(ex) > 4 and ex[4] == "sticky" else ORANGE
+        pygame.draw.circle(surf, ex_color, (int(ex[0]), int(ex[1])), ex[2], 3)
+        if len(ex) > 4 and ex[4] == "sticky":
+            # draw a second inner ring for web effect
+            inner_r = max(4, ex[2] - 10)
+            pygame.draw.circle(surf, (40, 160, 40), (int(ex[0]), int(ex[1])), inner_r, 2)
         ex[3] -= 1
         if ex[3] <= 0: game.explosions.remove(ex)
 
@@ -975,10 +1033,13 @@ while running:
             # ---- CLASS SELECT ----
             elif game.mode == "CLASS_SELECT":
                 class_keys = list(CLASS_DEFS.keys())
+                card_w, card_h, gap = 220, 300, 12
+                total_w = len(class_keys) * card_w + (len(class_keys) - 1) * gap
+                start_x = WIDTH//2 - total_w//2
                 for i, ckey in enumerate(class_keys):
-                    bx = WIDTH//2 - 420 + i * 290
-                    by = HEIGHT//2 - 120
-                    if bx <= mx <= bx+260 and by <= my <= by+300:
+                    bx = start_x + i * (card_w + gap)
+                    by = HEIGHT//2 - card_h//2
+                    if bx <= mx <= bx+card_w and by <= my <= by+card_h:
                         game.audio.play_sfx("click")
                         game.start_run(ckey)
                         break
@@ -1182,33 +1243,32 @@ while running:
 
     # ===================== CLASS SELECT =====================
     elif game.mode == "CLASS_SELECT":
-        draw_text(screen, "CHOOSE YOUR CLASS", pygame.font.SysFont("Arial", 48, bold=True), GOLD, WIDTH//2, 60, center=True)
+        draw_text(screen, "CHOOSE YOUR CLASS", pygame.font.SysFont("Arial", 48, bold=True), GOLD, WIDTH//2, 45, center=True)
         class_keys = list(CLASS_DEFS.keys())
+        card_w, card_h, gap = 220, 300, 12
+        total_w = len(class_keys) * card_w + (len(class_keys) - 1) * gap
+        start_x = WIDTH//2 - total_w//2
         for i, ckey in enumerate(class_keys):
             cdef = CLASS_DEFS[ckey]
-            bx = WIDTH//2 - 420 + i * 290
-            by = HEIGHT//2 - 120
-            is_hover = bx <= mx <= bx+260 and by <= my <= by+300
-            pygame.draw.rect(screen, (20, 20, 30), (bx, by, 260, 300), border_radius=12)
-            pygame.draw.rect(screen, cdef["color"] if is_hover else DARK_GRAY, (bx, by, 260, 300), 3, border_radius=12)
-            # Class name
-            draw_text(screen, cdef["name"], pygame.font.SysFont("Arial", 28, bold=True), cdef["color"], bx+130, by+30, center=True)
-            # Description
+            bx = start_x + i * (card_w + gap)
+            by = HEIGHT//2 - card_h//2
+            is_hover = bx <= mx <= bx+card_w and by <= my <= by+card_h
+            pygame.draw.rect(screen, (20, 20, 30), (bx, by, card_w, card_h), border_radius=12)
+            pygame.draw.rect(screen, cdef["color"] if is_hover else DARK_GRAY, (bx, by, card_w, card_h), 3, border_radius=12)
+            draw_text(screen, cdef["name"], pygame.font.SysFont("Arial", 24, bold=True), cdef["color"], bx+card_w//2, by+28, center=True)
             desc_words = cdef["desc"].split()
-            dy = by + 70; line = ""
+            dy = by + 62; line = ""
             for w in desc_words:
-                if font.size(line + w)[0] > 230: draw_text(screen, line, font, WHITE, bx+15, dy); dy += 20; line = w + " "
+                if font.size(line + w)[0] > card_w - 20: draw_text(screen, line, font, WHITE, bx+10, dy); dy += 20; line = w + " "
                 else: line += w + " "
-            draw_text(screen, line, font, WHITE, bx+15, dy); dy += 30
-            # Deck detail (smaller text)
+            draw_text(screen, line, font, WHITE, bx+10, dy); dy += 28
             detail_words = ("DECK: " + cdef["detail"]).split()
             line = ""
             for w in detail_words:
-                if font.size(line + w)[0] > 230: draw_text(screen, line, font, GRAY, bx+15, dy); dy += 18; line = w + " "
+                if font.size(line + w)[0] > card_w - 20: draw_text(screen, line, font, GRAY, bx+10, dy); dy += 17; line = w + " "
                 else: line += w + " "
-            draw_text(screen, line, font, GRAY, bx+15, dy)
-            # Click hint
-            draw_text(screen, "Click to Select", font, GOLD if is_hover else GRAY, bx+130, by+270, center=True)
+            draw_text(screen, line, font, GRAY, bx+10, dy)
+            draw_text(screen, "Click to Select", font, GOLD if is_hover else GRAY, bx+card_w//2, by+card_h-22, center=True)
 
         # Back button
         back_hover = 20 <= mx <= 130 and 20 <= my <= 55
