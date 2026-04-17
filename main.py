@@ -24,6 +24,13 @@ FLYING_BOSS_COLOR = (200, 100, 255)
 SPLITTER_BOSS_COLOR = (255, 120, 40)
 SHIELDED_BOSS_COLOR = (140, 140, 255)
 
+# Map canvas constants
+MAP_TIER_SPACING = 130       # vertical pixels between tiers on virtual canvas
+MAP_MARGIN_BOTTOM = 90       # bottom padding on virtual canvas
+MAP_CANVAS_H = 1900          # total virtual canvas height
+MAP_SCROLLBAR_W = 14         # scrollbar width
+MAP_HUD_H = 70               # height reserved at top for HUD
+
 # Curse colors / identifiers
 CURSE_COLOR = (180, 30, 180)
 CURSE_DEFINITIONS = {
@@ -130,25 +137,25 @@ class CardTemplate:
                 self.damage += int(self.base_damage * 0.5)
                 if self.aoe_radius > 0: self.aoe_radius += 20
                 if "Frost" in self.name: self.cost = 1; self.description = "Low damage. Slows enemies by 50%."
-                if "Sniper" in self.name: self.range += 30; self.description = "Pierces armor. Very slow."
-                if "Chain" in self.name: self.chain += 4; self.cost = 1; self.description = f"Arcs to {self.chain} nearby enemies."
-            elif self.type == "WALL": self.hp += int(self.base_hp * 0.5)
+                if "Sniper" in self.name: self.cost = 2; self.description = "Pierces armor. Very slow."
+                if "Chain" in self.name: self.chain += 2; self.cost = 1; self.description = f"Arcs to {self.chain} nearby enemies."
+            elif self.type == "WALL": self.hp += int(self.base_hp * 2); self.description = "Blocks path. Has 150 HP."
             elif self.type == "SKILL":
                 if "Repair" in self.name:
                     self.energy_gain += 1; self.cost = 0; self.description = "Heals base by 15 HP. Gain 1 Energy."
                 elif "Quick Thinking" in self.name:
-                    self.draw_amount = 2; self.energy_gain = 2; self.description = "Draw 2. Gain 2 Energy."
+                    self.draw_amount = 2; self.energy_gain = 2; self.exhaust = True; self.description = "Draw 2. Gain 2 Energy. Exhaust."
                 elif "Brainstorm" in self.name: self.cost = 0
                 else: self.cost = max(0, self.cost - 1)
 
 def get_all_cards():
     return [
-        CardTemplate("Arrow Tower",    1, "TOWER", damage=10, range=120, fire_rate=45,  description="Fast, basic tower."),
+        CardTemplate("Arrow Tower",    1, "TOWER", damage=20, range=120, fire_rate=45,  description="Fast, basic tower."),
         CardTemplate("Cannon",         2, "TOWER", damage=35, range=100, fire_rate=100, description="Heavy damage, slow."),
-        CardTemplate("The Bomber",     2, "TOWER", damage=25, range=110, fire_rate=120, aoe_radius=60, description="Deals splash damage."),
-        CardTemplate("Frost Tower",    2, "TOWER", damage=5,  range=110, fire_rate=50,  description="Low damage. Slows enemies by 50%.", slows=True),
-        CardTemplate("Sniper Tower",   3, "TOWER", damage=50, range=120, fire_rate=180, description="Pierces armor. Very slow.", piercing=True),
-        CardTemplate("Chain Lightning",2, "TOWER", damage=18, range=110, fire_rate=80,  description="Arcs to 2 nearby enemies.", chain=2),
+        CardTemplate("The Bomber",     2, "TOWER", damage=20, range=110, fire_rate=120, aoe_radius=60, description="Deals splash damage."),
+        CardTemplate("Frost Tower",    2, "TOWER", damage=22,  range=110, fire_rate=50,  description="Slows enemies by 50%.", slows=True),
+        CardTemplate("Sniper Tower",   3, "TOWER", damage=100, range=120, fire_rate=250, description="Pierces armor. Very slow.", piercing=True),
+        CardTemplate("Chain Lightning",2, "TOWER", damage=25, range=110, fire_rate=80,  description="Arcs to 2 nearby enemies.", chain=2),
         CardTemplate("Wooden Wall",    1, "WALL",  hp=50,  description="Blocks path. Has 50 HP."),
         CardTemplate("Repair",         1, "SKILL", description="Heals base by 15 HP."),
         CardTemplate("Quick Thinking", 0, "SKILL", draw=1,  energy_gain=1, description="Draw 1. Gain 1 Energy."),
@@ -161,22 +168,22 @@ CLASS_DEFS = {
         "name": "Mage",
         "color": CYAN,
         "desc": "Master of elemental towers. Controls the battlefield with frost and lightning.",
-        "detail": "3x Frost Tower, 2x Chain Lightning, 1x Repair, 2x Wooden Wall, 1x Quick Thinking, 1x Brainstorm",
-        "deck_indices": [3, 3, 3, 5, 5, 7, 6, 6, 8, 9],  # indices into get_all_cards()
+        "detail": "2x Frost Tower, 2x Chain Lightning, 1x Repair, 1x Wooden Wall, 2x Quick Thinking, 2x Brainstorm",
+        "deck_indices": [3, 3, 5, 5, 7, 6, 8, 8, 9, 9],  # indices into get_all_cards()
     },
     "BOMBER": {
         "name": "Bomber",
         "color": ORANGE,
         "desc": "Explosive specialist. Obliterates groups with cannon fire and cluster bombs.",
-        "detail": "3x Cannon, 2x The Bomber, 1x Repair, 2x Wooden Wall, 1x Quick Thinking, 1x Brainstorm",
-        "deck_indices": [1, 1, 1, 2, 2, 7, 6, 6, 8, 9],
+        "detail": "2x Cannon, 2x The Bomber, 1x Repair, 1x Wooden Wall, 2x Quick Thinking, 2x Brainstorm",
+        "deck_indices": [1, 1, 2, 2, 7, 6, 8, 8, 9, 9],
     },
     "ROGUE": {
         "name": "Rogue",
         "color": GREEN,
         "desc": "Swift and precise. Overwhelms enemies with rapid arrows and piercing shots.",
-        "detail": "3x Arrow Tower, 2x Sniper Tower, 1x Repair, 2x Wooden Wall, 1x Quick Thinking, 1x Brainstorm",
-        "deck_indices": [0, 0, 0, 4, 4, 7, 6, 6, 8, 9],
+        "detail": "2x Arrow Tower, 2x Sniper Tower, 1x Repair, 1x Wooden Wall, 2x Quick Thinking, 2x Brainstorm",
+        "deck_indices": [0, 0, 4, 4, 7, 6, 8, 8, 9, 9],
     },
 }
 
@@ -319,11 +326,12 @@ class GameState:
         # Curse system
         self.active_curses = []        # curses active THIS battle
         self.pending_curses = []       # curses chosen, applied on next battle entry
-        self.curse_cycle_index = 0     # cycles through CURSE_CYCLE
 
         # Curse reward state
-        self.curse_reward_cards = []   # all 3 possible reward cards
+        self.curse_reward_cards = []          # all 3 possible reward cards
+        self.curse_reward_preview_curses = [] # pre-rolled curses shown on reward screen
         self.curse_choice_made = False
+        self.map_scroll = 0  # virtual canvas scroll offset
 
     def _init_class_deck(self, class_key):
         all_cards = get_all_cards()
@@ -331,29 +339,64 @@ class GameState:
         self.master_deck = [all_cards[i].clone() for i in indices]
 
     def generate_map(self):
+        # 12 battle tiers + 1 boss = 13 tiers total
+        NUM_TIERS = 12
         self.map_tiers = []
-        for t in range(5):
-            num_nodes = random.randint(4, 6)
-            tier_nodes = []
-            for n in range(num_nodes):
-                x = WIDTH // 2 + (n - (num_nodes-1)/2) * 120 + random.randint(-15, 15)
-                y = HEIGHT - 100 - t * 100
-                if self.loop_count == 0 and t == 0: type = 'TUTORIAL'
-                elif t == 0: type = 'BATTLE'
-                else: type = random.choices(['BATTLE','ELITE','SHOP','CAMPFIRE'], weights=[35,15,25,25])[0]
-                tier_nodes.append(MapNode(x, y, type, t))
-            self.map_tiers.append(tier_nodes)
-        self.map_tiers.append([MapNode(WIDTH//2, 120, 'BOSS', 5)])
 
-        for t in range(5):
-            for node in self.map_tiers[t]:
-                targets = random.sample(self.map_tiers[t+1], k=random.randint(1, min(2, len(self.map_tiers[t+1]))))
-                node.connections.extend(targets)
-        for t in range(1, 6):
-            for target in self.map_tiers[t]:
-                if not any(target in n.connections for n in self.map_tiers[t-1]):
-                    random.choice(self.map_tiers[t-1]).connections.append(target)
+        for t in range(NUM_TIERS):
+            num_nodes = random.randint(3, 5)
+            tier_nodes = []
+            band_w = 700
+            for n in range(num_nodes):
+                x = WIDTH // 2 - band_w // 2 + int((n + 0.5) * band_w / num_nodes)
+                y = MAP_CANVAS_H - MAP_MARGIN_BOTTOM - t * MAP_TIER_SPACING
+                if self.loop_count == 0 and t == 0:
+                    ntype = 'TUTORIAL'
+                elif t == 0:
+                    ntype = 'BATTLE'
+                else:
+                    ntype = random.choices(
+                        ['BATTLE', 'ELITE', 'SHOP', 'CAMPFIRE'],
+                        weights=[35, 15, 25, 25]
+                    )[0]
+                tier_nodes.append(MapNode(x, y, ntype, t))
+            self.map_tiers.append(tier_nodes)
+
+        # Boss node at the very top
+        boss_y = MAP_CANVAS_H - MAP_MARGIN_BOTTOM - NUM_TIERS * MAP_TIER_SPACING
+        self.map_tiers.append([MapNode(WIDTH // 2, boss_y, 'BOSS', NUM_TIERS)])
+
+        # Connect tiers: ensure nodes only connect to adjacent nodes to prevent overlapping
+        for t in range(NUM_TIERS):
+            len_current = len(self.map_tiers[t])
+            len_next = len(self.map_tiers[t + 1])
+            for i, node in enumerate(self.map_tiers[t]):
+                # Map the current index to an approximate index in the next tier
+                base_j = int(i * (len_next / len_current))
+                
+                # Allow connecting straight, slightly left, or slightly right
+                candidates = set([base_j])
+                if base_j > 0: candidates.add(base_j - 1)
+                if base_j < len_next - 1: candidates.add(base_j + 1)
+                
+                # Pick 1 or 2 paths
+                k = random.randint(1, min(2, len(candidates)))
+                chosen_indices = random.sample(list(candidates), k=k)
+                for j in chosen_indices:
+                    node.connections.append(self.map_tiers[t + 1][j])
+
+        # Guarantee every node in tiers 1+ is reachable
+        for t in range(1, NUM_TIERS + 1):
+            for j, target in enumerate(self.map_tiers[t]):
+                if not any(target in n.connections for n in self.map_tiers[t - 1]):
+                    # Connect from the closest node in the previous tier
+                    len_prev = len(self.map_tiers[t - 1])
+                    closest_i = int(j * (len_prev / len(self.map_tiers[t])))
+                    closest_i = max(0, min(len_prev - 1, closest_i))
+                    self.map_tiers[t - 1][closest_i].connections.append(target)
+
         self.available_next_nodes = self.map_tiers[0]
+        self.map_scroll = 99999  # will be clamped to max_scroll on first draw (shows bottom)
 
     def start_run(self, class_key):
         self.selected_class = class_key
@@ -363,7 +406,7 @@ class GameState:
         self.loop_count = 0
         self.active_curses = []
         self.pending_curses = []
-        self.curse_cycle_index = 0
+        self.curse_reward_preview_curses = []
         self.generate_map()
         self.mode = "MAP"
 
@@ -570,12 +613,14 @@ class GameState:
                     self.gold += e.reward
                     self.audio.play_sfx("death")
                     if e.type == "SPLITTER" and not e.has_split:
+                        e.has_split = True
                         for _ in range(2):
                             child = Enemy("SWARM", 1.0)
                             child.x, child.y = e.x, e.y
                             child.path_index = e.path_index
                             self.enemies.append(child)
-                    if e.type == "SPLITTER_BOSS" and not e.has_split:
+                    elif e.type == "SPLITTER_BOSS" and not e.has_split:
+                        e.has_split = True
                         for _ in range(3):
                             child = Enemy("SPLITTER", 1.0)
                             child.x, child.y = e.x, e.y
@@ -635,7 +680,7 @@ class GameState:
                         if not is_menu: self.audio.play_sfx("shoot")
                         hit_targets = {target}
                         last_target = target
-                        chain_dmg = total_dmg // 2
+                        chain_dmg = int(total_dmg * 0.7)
                         for _ in range(t.template.chain):
                             nearby = [e for e in self.enemies if e not in hit_targets and math.hypot(e.x - last_target.x, e.y - last_target.y) <= 80]
                             if not nearby: break
@@ -643,7 +688,7 @@ class GameState:
                             self.lasers.append((int(last_target.x), int(last_target.y), int(arc_t.x), int(arc_t.y)))
                             arm = 0 if t.template.piercing else arc_t.armor
                             arc_t.hp -= max(1, chain_dmg - arm)
-                            hit_targets.add(arc_t); last_target = arc_t; chain_dmg = chain_dmg // 2
+                            hit_targets.add(arc_t); last_target = arc_t; chain_dmg = int(total_dmg * 0.7)
                     else:
                         arm = 0 if t.template.piercing else target.armor
                         target.hp -= max(1, total_dmg - arm)
@@ -657,7 +702,22 @@ class GameState:
                 if not is_menu:
                     self.gold += e.reward
                     self.audio.play_sfx("death")
-                if e in self.enemies: self.enemies.remove(e)
+                    if e.type == "SPLITTER" and not e.has_split:
+                        e.has_split = True
+                        for _ in range(2):
+                            child = Enemy("SWARM", 1.0)
+                            child.x, child.y = e.x, e.y
+                            child.path_index = e.path_index
+                            self.enemies.append(child)
+                    elif e.type == "SPLITTER_BOSS" and not e.has_split:
+                        e.has_split = True
+                        for _ in range(3):
+                            child = Enemy("SPLITTER", 1.0)
+                            child.x, child.y = e.x, e.y
+                            child.path_index = e.path_index
+                            self.enemies.append(child)
+                if e in self.enemies:
+                    self.enemies.remove(e)
 
     def update_menu(self):
         self.spawn_timer -= 1
@@ -675,16 +735,24 @@ class GameState:
 
     def open_curse_reward(self):
         """After a normal battle, show the 3-card / curse choice screen."""
-        self.reward_choices  = random.sample(get_all_cards(), 3)
-        self.curse_reward_cards = [c.clone() for c in self.reward_choices]
+        pool = random.sample(get_all_cards(), 3)
+        # ~30% chance one card in the pool is upgraded, chance scales with node tier
+        upgrade_chance = 0.20 + (self.current_node.tier * 0.10) if self.current_node else 0.20
+        upgraded_any = False
+        for c in pool:
+            if not upgraded_any and random.random() < upgrade_chance:
+                c.upgrade()
+                upgraded_any = True
+        self.curse_reward_cards = [c.clone() for c in pool]
+        self.curse_reward_preview_curses = random.sample(CURSE_CYCLE, 2)
         self.curse_choice_made  = False
         self.mode = "CURSE_REWARD"
         self.audio.play_bgm("SHOP_REST")
 
     def _next_curse(self):
-        curse_id = CURSE_CYCLE[self.curse_cycle_index % len(CURSE_CYCLE)]
-        self.curse_cycle_index += 1
-        return curse_id
+        if self.curse_reward_preview_curses:
+            return self.curse_reward_preview_curses.pop(0)
+        return random.choice(CURSE_CYCLE)
 
     def update_battle(self):
         if self.paused: return
@@ -753,11 +821,15 @@ def draw_item_box(surf, title, desc, cost, x, y, width, height, is_hover, show_c
     if show_cost: draw_text(surf, f"{cost}g", font, WHITE, x+width-40, y+10)
     draw_text(surf, desc, font, GRAY, x+10, y+40)
 
-def draw_passives(surf, game, mx, my):
+def draw_passives(surf, game, mx, my, start_x=None, cy=10):
+    """Draw passive badges. If start_x given, lay out left-to-right from that x.
+    Otherwise center around WIDTH//2 (legacy battle mode behavior)."""
+    if start_x is None:
+        start_x = WIDTH//2 - (len(game.passives)*40)//2
     tooltip = None
     for i, pid in enumerate(game.passives):
         passive = PASSIVE_DB[pid]
-        px, py = WIDTH//2 - (len(game.passives)*40)//2 + i*40, 10
+        px, py = start_x + i*38, cy
         pygame.draw.rect(surf, PURPLE, (px, py, 32, 32), border_radius=5)
         pygame.draw.rect(surf, GOLD,   (px, py, 32, 32), 2, border_radius=5)
         draw_text(surf, "P", font, WHITE, px+16, py+16, center=True)
@@ -765,21 +837,40 @@ def draw_passives(surf, game, mx, my):
             tooltip = (passive.name, passive.description, px, py+40)
     if tooltip:
         box_w = max(font.size(tooltip[0])[0], font.size(tooltip[1])[0]) + 20
+        box_w = min(box_w, WIDTH - tooltip[2] - 5)
         pygame.draw.rect(surf, DARK_GRAY, (tooltip[2], tooltip[3], box_w, 45), border_radius=5)
         pygame.draw.rect(surf, GOLD,      (tooltip[2], tooltip[3], box_w, 45), 2, border_radius=5)
         draw_text(surf, tooltip[0], font, GOLD,  tooltip[2]+10, tooltip[3]+5)
         draw_text(surf, tooltip[1], font, WHITE, tooltip[2]+10, tooltip[3]+25)
+    # Return x position after all passives (for chaining)
+    return start_x + len(game.passives) * 38
 
-def draw_active_curses(surf, game):
+def draw_active_curses(surf, game, mx=0, my=0):
+    """Draw active curse icons next to passives at top of screen. Returns tooltip info if hovering."""
     if not game.active_curses: return
-    x = WIDTH - 10
-    for cid in game.active_curses:
-        name, _ = CURSE_DEFINITIONS[cid]
-        tw = font.size(f"CURSE: {name}")[0] + 12
-        x -= tw + 6
-        pygame.draw.rect(surf, (80, 0, 80), (x, 65, tw, 22), border_radius=4)
-        pygame.draw.rect(surf, CURSE_COLOR, (x, 65, tw, 22), 2, border_radius=4)
-        draw_text(surf, f"CURSE: {name}", font, (255, 150, 255), x+6, 66)
+    # Position curses to the right of passives row
+    passive_count = len(game.passives)
+    passives_end_x = WIDTH//2 + (passive_count * 40) // 2 + 10
+    tooltip = None
+    for i, cid in enumerate(game.active_curses):
+        name, desc = CURSE_DEFINITIONS[cid]
+        cx = passives_end_x + i * 38
+        cy = 10
+        is_hover = cx <= mx <= cx + 32 and cy <= my <= cy + 32
+        # Draw curse badge
+        pygame.draw.rect(surf, (90, 0, 90), (cx, cy, 32, 32), border_radius=5)
+        pygame.draw.rect(surf, CURSE_COLOR if not is_hover else (255, 80, 255), (cx, cy, 32, 32), 2, border_radius=5)
+        draw_text(surf, "C", font, (255, 150, 255), cx + 16, cy + 16, center=True)
+        if is_hover:
+            tooltip = (name, desc, cx, cy + 40)
+    if tooltip:
+        box_w = max(font.size(tooltip[0])[0], font.size(tooltip[1])[0]) + 20
+        box_w = min(box_w, 320)
+        tx = min(tooltip[2], WIDTH - box_w - 5)
+        pygame.draw.rect(surf, (60, 0, 60), (tx, tooltip[3], box_w, 55), border_radius=5)
+        pygame.draw.rect(surf, CURSE_COLOR, (tx, tooltip[3], box_w, 55), 2, border_radius=5)
+        draw_text(surf, tooltip[0], font, (255, 150, 255), tx + 10, tooltip[3] + 6)
+        draw_text(surf, tooltip[1], font, WHITE, tx + 10, tooltip[3] + 28)
 
 def draw_grid_and_entities(surf, game):
     for r in range(ROWS):
@@ -859,6 +950,11 @@ while running:
                 game.shopkeeper_index += 1
                 game.audio.play_sfx("click")
 
+        if event.type == pygame.MOUSEWHEEL and game.mode == "MAP":
+            scroll_area_h = HEIGHT - MAP_HUD_H - 50
+            max_scroll = max(0, MAP_CANVAS_H - scroll_area_h)
+            game.map_scroll = max(0, min(max_scroll, game.map_scroll - event.y * 40))
+
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if game.paused:
                 game.audio.play_sfx("click")
@@ -899,8 +995,11 @@ while running:
                     game.deck_viewer_prev_mode = "MAP"
                     game.mode = "DECK_VIEWER"
                 else:
+                    # Convert screen coords to virtual canvas coords
+                    scroll_area_h = HEIGHT - MAP_HUD_H - 50
+                    virtual_my = my + game.map_scroll - MAP_HUD_H
                     for node in game.available_next_nodes:
-                        if math.hypot(mx - node.x, my - node.y) < 25:
+                        if math.hypot(mx - node.x, virtual_my - node.y) < 25:
                             game.audio.play_sfx("click")
                             game.select_node(node); break
 
@@ -922,7 +1021,7 @@ while running:
                 if 18 <= mx <= 163 and HEIGHT-83 <= my <= HEIGHT-58:
                     game.audio.play_sfx("click")
                     game.deck_viewer_tab = "DRAW"
-                    game.deck_viewer_prev_mode = game.battle_phase
+                    game.deck_viewer_prev_mode = "BATTLE"
                     game.mode = "DECK_VIEWER"
                 hand_x = WIDTH//2 - (len(game.hand)*130)//2
                 for i, card in enumerate(game.hand):
@@ -941,11 +1040,10 @@ while running:
                 for num_cards, num_curses, oy, label in options:
                     if WIDTH//2 - 280 <= mx <= WIDTH//2 + 280 and oy <= my <= oy + 110:
                         game.audio.play_sfx("click")
-                        # Add cards
-                        chosen = random.sample(game.curse_reward_cards, min(num_cards, len(game.curse_reward_cards)))
-                        for c in chosen:
+                        # Add the exact cards shown on screen (first N from the list)
+                        for c in game.curse_reward_cards[:num_cards]:
                             game.master_deck.append(c.clone())
-                        # Add curses as pending
+                        # Add curses as pending for the next battle
                         for _ in range(num_curses):
                             game.pending_curses.append(game._next_curse())
                         game.curse_choice_made = True
@@ -964,23 +1062,27 @@ while running:
                         game.audio.play_bgm("MAIN")
 
             elif game.mode == "ELITE_REWARD":
-                if WIDTH//2-100 <= mx <= WIDTH//2+100 and 600 <= my <= 640:
-                    game.audio.play_sfx("click")
-                    if game.beat_boss_in_endless:
-                        game.beat_boss_in_endless = False; game.loop_count += 1; game.generate_map()
-                    game.mode = "MAP"; game.audio.play_bgm("MAIN")
+                card_y = 110
+                card_xs = [30, 165, 300]
                 if not game.reward_card_picked:
                     for i, card in enumerate(game.reward_choices):
-                        if 150+i*150 <= mx <= 150+i*150+120 and 200 <= my <= 360:
+                        cx = card_xs[i]
+                        if cx <= mx <= cx+120 and card_y <= my <= card_y+160:
                             game.audio.play_sfx("click"); game.master_deck.append(card.clone()); game.reward_card_picked = True
                 if not game.reward_passive_picked:
+                    passive_x = WIDTH//2 + 20
+                    passive_w = WIDTH//2 - 40
                     for i, passive in enumerate(game.elite_passive_choices):
-                        if 650 <= mx <= 850 and 200+i*100 <= my <= 280+i*100:
+                        py = 110 + i * 95
+                        if passive_x <= mx <= passive_x + passive_w and py <= my <= py + 80:
                             game.audio.play_sfx("click"); game.add_passive(passive.id); game.reward_passive_picked = True
+                # Continue button — only clickable once both rewards are picked
                 if game.reward_card_picked and game.reward_passive_picked:
-                    if game.beat_boss_in_endless:
-                        game.beat_boss_in_endless = False; game.loop_count += 1; game.generate_map()
-                    game.mode = "MAP"; game.audio.play_bgm("MAIN")
+                    if WIDTH//2-100 <= mx <= WIDTH//2+100 and HEIGHT-60 <= my <= HEIGHT-20:
+                        game.audio.play_sfx("click")
+                        if game.beat_boss_in_endless:
+                            game.beat_boss_in_endless = False; game.loop_count += 1; game.generate_map()
+                        game.mode = "MAP"; game.audio.play_bgm("MAIN")
 
             elif game.mode == "SHOP":
                 if 400 <= mx <= 600 and 610 <= my <= 655:
@@ -1115,42 +1217,197 @@ while running:
 
     # ===================== MAP =====================
     elif game.mode == "MAP":
-        loop_text = f" | Loop: {game.loop_count + 1}" if game.is_endless else ""
-        draw_text(screen, f"HP: {game.base_hp}/{game.base_max_hp}  Gold: {game.gold}{loop_text}", large_font, WHITE, WIDTH//2, 30, center=True)
-        draw_passives(screen, game, mx, my)
-        # Active curses display on map
-        if game.pending_curses:
-            cx = 10
-            draw_text(screen, "Next battle curses:", font, CURSE_COLOR, cx, 65)
-            for cid in game.pending_curses:
-                name, _ = CURSE_DEFINITIONS[cid]
-                draw_text(screen, f"  {name}", font, (255,120,255), cx, 83 + game.pending_curses.index(cid)*18)
-        deck_btn_hover = 20 <= mx <= 160 and HEIGHT-45 <= my <= HEIGHT-15
-        pygame.draw.rect(screen, BLUE if deck_btn_hover else DARK_GRAY, (20, HEIGHT-45, 140, 30), border_radius=5)
-        draw_text(screen, f"View Deck ({len(game.master_deck)})", font, WHITE, 90, HEIGHT-30, center=True)
-        for tier in game.map_tiers:
-            for node in tier:
-                for t in node.connections:
-                    pygame.draw.line(screen, GOLD if node == game.current_node else GRAY, (node.x, node.y), (t.x, t.y), 2)
-        for tier in game.map_tiers:
-            for node in tier:
-                color = GREEN if node in game.available_next_nodes else (GOLD if node == game.current_node else GRAY)
-                pygame.draw.circle(screen, color, (node.x, node.y), 20)
-                icon = "B"
-                if node.type == 'TUTORIAL': icon = "T"; pygame.draw.circle(screen, BLUE, (node.x, node.y), 20, 3)
-                elif node.type == 'ELITE':   icon = "E"; pygame.draw.circle(screen, RED,  (node.x, node.y), 20, 3)
-                elif node.type == 'SHOP':    icon = "$"
-                elif node.type == 'CAMPFIRE':icon = "R"
-                elif node.type == 'BOSS':    icon = "BOSS"
-                draw_text(screen, icon, font, BLACK, node.x, node.y, center=True)
+        # --- Scrollable virtual canvas setup ---
+        scroll_area_h = HEIGHT - MAP_HUD_H - 50
+        max_scroll = max(0, MAP_CANVAS_H - scroll_area_h)
+        game.map_scroll = max(0, min(max_scroll, game.map_scroll))
 
+        # Background for map area
+        pygame.draw.rect(screen, (14, 14, 22), (0, MAP_HUD_H, WIDTH - MAP_SCROLLBAR_W, scroll_area_h))
+
+        # Virtual canvas
+        vsurf = pygame.Surface((WIDTH - MAP_SCROLLBAR_W, MAP_CANVAS_H))
+        vsurf.fill((14, 14, 22))
+
+        # emoji font for node icons (larger)
+        emoji_font = pygame.font.SysFont("Segoe UI Emoji", 20, bold=True)
+        label_font = pygame.font.SysFont("Arial", 13, bold=True)
+
+        # Node style: bg, border, emoji icon, icon color, display name
+        NODE_STYLE = {
+            'TUTORIAL': ((20, 35, 70),  (80, 140, 255),  "🎓", (180, 210, 255), "Tutorial"),
+            'BATTLE':   ((20, 45, 20),  (70, 210, 70),   "⚔️",  (160, 255, 160), "Battle"),
+            'ELITE':    ((65, 15, 15),  (220, 55, 55),   "💀", (255, 130, 130), "Elite"),
+            'SHOP':     ((55, 45, 5),   (255, 205, 0),   "🛒", (255, 230, 90),  "Shop"),
+            'CAMPFIRE': ((50, 28, 5),   (220, 120, 35),  "🔥", (255, 175, 70),  "Campfire"),
+            'BOSS':     ((55, 0, 55),   (210, 0, 210),   "👑", (255, 110, 255), "Boss"),
+        }
+        NODE_R = 26
+
+        # --- Draw connections (straight line style) ---
+        for tier in game.map_tiers:
+            for node in tier:
+                for target in node.connections:
+                    if node == game.current_node:
+                        lcolor, lw = (255, 215, 0), 4
+                    elif node in game.available_next_nodes:
+                        lcolor, lw = (80, 210, 80), 3
+                    else:
+                        lcolor, lw = (45, 45, 65), 2
+                    x1, y1 = node.x, node.y - NODE_R
+                    x2, y2 = target.x, target.y + NODE_R
+                    # Use a direct diagonal line so paths are easy to trace
+                    pygame.draw.line(vsurf, lcolor, (x1, y1), (x2, y2), lw)
+
+        # --- Draw nodes ---
+        for tier in game.map_tiers:
+            for node in tier:
+                style = NODE_STYLE.get(node.type, NODE_STYLE['BATTLE'])
+                bg_col, border_col, icon, icon_col, display_name = style
+
+                is_available = node in game.available_next_nodes
+                is_current   = node == game.current_node
+
+                # Override colors for state
+                if is_current:
+                    border_col = GOLD
+                    bg_col     = (55, 50, 8)
+                elif is_available:
+                    pygame.draw.circle(vsurf, (60, 240, 60), (node.x, node.y), NODE_R + 8, 2)
+
+                # Drop shadow
+                pygame.draw.circle(vsurf, (8, 8, 12), (node.x + 3, node.y + 3), NODE_R)
+                # Fill
+                pygame.draw.circle(vsurf, bg_col, (node.x, node.y), NODE_R)
+                # Border (thicker for available/current)
+                bw = 3 if (is_available or is_current) else 2
+                pygame.draw.circle(vsurf, border_col, (node.x, node.y), NODE_R, bw)
+
+                # Emoji icon — centered in circle
+                icon_surf = emoji_font.render(icon, True, icon_col)
+                ir = icon_surf.get_rect(center=(node.x, node.y))
+                vsurf.blit(icon_surf, ir)
+
+                # Label below node
+                lbl_surf = label_font.render(display_name, True, border_col)
+                lr = lbl_surf.get_rect(centerx=node.x, top=node.y + NODE_R + 4)
+                vsurf.blit(lbl_surf, lr)
+
+        # Blit virtual canvas into map area
+        clip_rect = pygame.Rect(0, MAP_HUD_H, WIDTH - MAP_SCROLLBAR_W, scroll_area_h)
+        screen.set_clip(clip_rect)
+        screen.blit(vsurf, (0, MAP_HUD_H - game.map_scroll))
+        screen.set_clip(None)
+
+        # --- Scrollbar ---
+        sb_x = WIDTH - MAP_SCROLLBAR_W
+        pygame.draw.rect(screen, (25, 25, 38), (sb_x, MAP_HUD_H, MAP_SCROLLBAR_W, scroll_area_h))
+        pygame.draw.line(screen, (50, 50, 70), (sb_x, MAP_HUD_H), (sb_x, MAP_HUD_H + scroll_area_h), 1)
+        if max_scroll > 0:
+            thumb_h = max(35, int(scroll_area_h * scroll_area_h / MAP_CANVAS_H))
+            thumb_y = MAP_HUD_H + int((scroll_area_h - thumb_h) * game.map_scroll / max_scroll)
+        else:
+            thumb_h, thumb_y = scroll_area_h, MAP_HUD_H
+        pygame.draw.rect(screen, (75, 75, 108), (sb_x + 2, thumb_y + 2, MAP_SCROLLBAR_W - 4, thumb_h - 4), border_radius=5)
+        pygame.draw.rect(screen, (130, 130, 170), (sb_x + 2, thumb_y + 2, MAP_SCROLLBAR_W - 4, thumb_h - 4), 1, border_radius=5)
+
+        # --- HUD bar (fixed, not scrolled) ---
+        pygame.draw.rect(screen, (16, 16, 28), (0, 0, WIDTH, MAP_HUD_H))
+        pygame.draw.line(screen, (50, 50, 80), (0, MAP_HUD_H - 1), (WIDTH, MAP_HUD_H - 1), 1)
+
+        # Shared sizes
+        hud_y   = MAP_HUD_H // 2   # vertical center of HUD bar
+        pad     = 12                # left padding / gap between items
+        hud_font = pygame.font.SysFont("Arial", 17, bold=True)
+
+        # -- HP --
+        hp_ratio  = game.base_hp / max(1, game.base_max_hp)
+        hp_col    = GREEN if hp_ratio > 0.5 else (ORANGE if hp_ratio > 0.25 else RED)
+        heart_surf = pygame.font.SysFont("Segoe UI Emoji", 18).render("♥", True, hp_col)
+        hp_str     = f" {game.base_hp}/{game.base_max_hp}"
+        hp_surf    = hud_font.render(hp_str, True, hp_col)
+        cursor_x   = pad
+        screen.blit(heart_surf, heart_surf.get_rect(midleft=(cursor_x, hud_y)))
+        cursor_x  += heart_surf.get_width() + 2
+        screen.blit(hp_surf, hp_surf.get_rect(midleft=(cursor_x, hud_y)))
+        cursor_x  += hp_surf.get_width() + pad * 2
+
+        # Divider
+        pygame.draw.line(screen, (60, 60, 90), (cursor_x, 8), (cursor_x, MAP_HUD_H - 8), 1)
+        cursor_x += pad
+
+        # -- Gold --
+        coin_surf  = pygame.font.SysFont("Segoe UI Emoji", 18).render("●", True, GOLD)
+        gold_str   = f" {game.gold}"
+        if game.is_endless:
+            gold_str += f"   Loop {game.loop_count + 1}"
+        gold_surf  = hud_font.render(gold_str, True, GOLD)
+        screen.blit(coin_surf, coin_surf.get_rect(midleft=(cursor_x, hud_y)))
+        cursor_x  += coin_surf.get_width() + 2
+        screen.blit(gold_surf, gold_surf.get_rect(midleft=(cursor_x, hud_y)))
+        cursor_x  += gold_surf.get_width() + pad * 2
+
+        # Divider
+        if game.passives:
+            pygame.draw.line(screen, (60, 60, 90), (cursor_x, 8), (cursor_x, MAP_HUD_H - 8), 1)
+            cursor_x += pad
+
+        # -- Passives (left-to-right from cursor_x) --
+        passive_cy = MAP_HUD_H // 2 - 14   # top of 32px badge to center vertically
+        after_passives_x = draw_passives(screen, game, mx, my, start_x=cursor_x, cy=passive_cy)
+        cursor_x = after_passives_x
+
+        # Divider before curses
+        if game.pending_curses:
+            if game.passives:
+                cursor_x += pad
+                pygame.draw.line(screen, (60, 60, 90), (cursor_x, 8), (cursor_x, MAP_HUD_H - 8), 1)
+                cursor_x += pad
+            else:
+                cursor_x += pad
+
+        # -- Curses (hoverable badges, continuation of same row) --
+        map_curse_tooltip = None
+        for ci_idx, cid in enumerate(game.pending_curses):
+            cname, cdesc = CURSE_DEFINITIONS[cid]
+            bw = hud_font.size(cname)[0] + 18
+            bh = 26
+            bx = cursor_x + ci_idx * (bw + 6)
+            by = hud_y - bh // 2
+            ch = bx <= mx <= bx + bw and by <= my <= by + bh
+            pygame.draw.rect(screen, (70, 0, 70), (bx, by, bw, bh), border_radius=5)
+            pygame.draw.rect(screen, (255, 80, 255) if ch else CURSE_COLOR, (bx, by, bw, bh), 1, border_radius=5)
+            skull_surf = hud_font.render(f"✦ {cname}", True, (255, 150, 255))
+            screen.blit(skull_surf, skull_surf.get_rect(midleft=(bx + 8, hud_y)))
+            if ch:
+                map_curse_tooltip = (cname, cdesc, bx, MAP_HUD_H + 4)
+
+        if map_curse_tooltip:
+            cname, cdesc, ttx, tty = map_curse_tooltip
+            tw1 = hud_font.size(cname)[0]
+            tw2 = hud_font.size(cdesc)[0]
+            box_w = min(max(tw1, tw2) + 24, 400)
+            ttx = min(ttx, WIDTH - box_w - 6)
+            pygame.draw.rect(screen, (50, 0, 50), (ttx, tty, box_w, 62), border_radius=6)
+            pygame.draw.rect(screen, CURSE_COLOR,  (ttx, tty, box_w, 62), 2, border_radius=6)
+            screen.blit(hud_font.render(cname, True, (255, 150, 255)), (ttx + 10, tty + 8))
+            screen.blit(hud_font.render(cdesc, True, WHITE),           (ttx + 10, tty + 28))
+            screen.blit(hud_font.render("(applies to your next battle)", True, GRAY), (ttx + 10, tty + 46))
+
+        # Deck button (bottom-left, outside scroll area)
+        deck_btn_hover = 20 <= mx <= 175 and HEIGHT - 45 <= my <= HEIGHT - 15
+        pygame.draw.rect(screen, BLUE if deck_btn_hover else (35, 35, 55), (20, HEIGHT - 45, 155, 30), border_radius=5)
+        pygame.draw.rect(screen, (80, 80, 120), (20, HEIGHT - 45, 155, 30), 1, border_radius=5)
+        deck_str = f"View Deck  ({len(game.master_deck)})"
+        screen.blit(hud_font.render(deck_str, True, WHITE),
+                    hud_font.render(deck_str, True, WHITE).get_rect(center=(97, HEIGHT - 30)))
     # ===================== BATTLE =====================
     elif game.mode == "BATTLE":
         draw_grid_and_entities(screen, game)
         draw_text(screen, f"Base HP: {game.base_hp}/{game.base_max_hp}", font, GREEN, 20, 20)
         draw_text(screen, f"Gold: {game.gold}", font, GOLD, 20, 40)
         draw_text(screen, f"Wave: {game.wave}/{game.max_waves}", font, WHITE, 20, 60)
-        draw_active_curses(screen, game)
+        draw_active_curses(screen, game, mx, my)
 
         draw_text(screen, f"Energy: {game.energy}/{game.max_energy}", large_font, BLUE, 20, HEIGHT-130)
         if "OVERCHARGE" in game.passives and not game.overcharge_used:
@@ -1209,40 +1466,120 @@ while running:
             (3, 2, HEIGHT//2 + 80,  "3 Cards  |  2 Curses"),
         ]
         cards_all = game.curse_reward_cards
+        curse_tooltip = None
+        card_tooltip = None
         for num_cards, num_curses, oy, label in options:
             is_hover = WIDTH//2-280 <= mx <= WIDTH//2+280 and oy <= my <= oy+110
-            # Background box
             box_color = (40, 40, 55) if not is_hover else (60, 60, 80)
             border_color = GOLD if is_hover else (CURSE_COLOR if num_curses > 0 else GREEN)
             pygame.draw.rect(screen, box_color, (WIDTH//2-280, oy, 560, 110), border_radius=10)
             pygame.draw.rect(screen, border_color, (WIDTH//2-280, oy, 560, 110), 3, border_radius=10)
-            # Label
             label_color = GREEN if num_curses == 0 else (ORANGE if num_curses == 1 else RED)
             draw_text(screen, label, large_font, label_color, WIDTH//2-270, oy+10)
-            # Show card names for this option
+            
+            # Show card name badges (hoverable)
             shown_cards = cards_all[:num_cards]
+            
+            # Start drawing items dynamically from the left edge
+            current_x = WIDTH // 2 - 260
             for ci, card in enumerate(shown_cards):
-                draw_text(screen, f"  {card.name}", font, WHITE, WIDTH//2-270 + ci*185, oy+55)
-            # Show curse names
+                cbw = font.size(card.name)[0] + 16
+                cbx = current_x
+                cby = oy + 45
+                
+                card_hover = cbx <= mx <= cbx + cbw and cby <= my <= cby + 22
+                badge_color = (50, 80, 50) if not card.upgraded else (50, 50, 80)
+                border_c = GREEN if card.upgraded else (180, 180, 180)
+                pygame.draw.rect(screen, badge_color, (cbx, cby, cbw, 22), border_radius=4)
+                pygame.draw.rect(screen, border_c, (cbx, cby, cbw, 22), 2, border_radius=4)
+                draw_text(screen, card.name, font, GOLD if card.upgraded else WHITE, cbx + 8, cby + 4)
+                if card_hover:
+                    card_tooltip = (card, cbx, oy)
+                
+                # Advance the X position for the next card badge
+                current_x += cbw + 10 
+
+            # Show curse badges (hoverable)
             if num_curses > 0:
-                curse_text = "  ".join(CURSE_DEFINITIONS[CURSE_CYCLE[(game.curse_cycle_index + j) % len(CURSE_CYCLE)]][0] for j in range(num_curses))
-                draw_text(screen, f"Curses: {curse_text}", font, CURSE_COLOR, WIDTH//2-270, oy+80)
+                current_x = WIDTH // 2 - 260 # Reset X to start on the next line down
+                for j in range(num_curses):
+                    cid = game.curse_reward_preview_curses[j]
+                    cname, cdesc = CURSE_DEFINITIONS[cid]
+                    badge_w = font.size(cname)[0] + 28
+                    badge_x = current_x
+                    badge_y = oy + 75
+                    
+                    ch = badge_x <= mx <= badge_x + badge_w and badge_y <= my <= badge_y + 24
+                    pygame.draw.rect(screen, (80, 0, 80), (badge_x, badge_y, badge_w, 24), border_radius=5)
+                    pygame.draw.rect(screen, (255, 80, 255) if ch else CURSE_COLOR, (badge_x, badge_y, badge_w, 24), 2, border_radius=5)
+                    draw_text(screen, f"⚠ {cname}", font, (255, 150, 255), badge_x + 6, badge_y + 4)
+                    if ch:
+                        curse_tooltip = (cname, cdesc, badge_x, badge_y + 30)
+                        
+                    # Advance the X position for the next curse badge
+                    current_x += badge_w + 10
+        # Draw curse tooltip on top
+        if curse_tooltip:
+            cname, cdesc, ttx, tty = curse_tooltip
+            box_w = max(font.size(cname)[0], font.size(cdesc)[0]) + 20
+            box_w = min(box_w, 360)
+            ttx = min(ttx, WIDTH - box_w - 5)
+            pygame.draw.rect(screen, (60, 0, 60), (ttx, tty, box_w, 58), border_radius=6)
+            pygame.draw.rect(screen, CURSE_COLOR, (ttx, tty, box_w, 58), 2, border_radius=6)
+            draw_text(screen, cname, font, (255, 150, 255), ttx + 10, tty + 6)
+            draw_text(screen, cdesc, font, WHITE, ttx + 10, tty + 28)
+            draw_text(screen, "(applies to your next battle)", font, GRAY, ttx + 10, tty + 42)
+        # Draw card tooltip (mini card preview) on top
+        if card_tooltip:
+            card, cbx, oy = card_tooltip
+            px = min(cbx, WIDTH - 130)
+            py = oy - 175 if oy > HEIGHT // 2 else oy + 120
+            draw_card(screen, card, px, py, True)
 
     # ===================== ELITE REWARD =====================
     elif game.mode == "ELITE_REWARD":
-        draw_text(screen, "ELITE DEFEATED! CHOOSE 1 CARD & 1 PASSIVE", large_font, GOLD, WIDTH//2, 80, center=True)
+        is_boss_reward = game.current_node and game.current_node.type == 'BOSS'
+        title = "BOSS DEFEATED! CHOOSE 1 CARD & 1 PASSIVE" if is_boss_reward else "ELITE DEFEATED! CHOOSE 1 CARD & 1 PASSIVE"
+        draw_text(screen, title, large_font, GOLD, WIDTH//2, 35, center=True)
+
+        # --- LEFT SIDE: 3 upgraded cards ---
+        # Cards are 120px wide; spread 3 cards centred in left half (x 0..500)
+        card_y = 110
+        card_xs = [30, 165, 300]
+        draw_text(screen, "CHOOSE 1 UPGRADED CARD:", font, GOLD, 220, 88, center=True)
         if not game.reward_card_picked:
-            draw_text(screen, "CHOOSE 1 UPGRADED CARD", font, WHITE, 350, 160, center=True)
-            for i, card in enumerate(game.reward_choices): draw_card(screen, card, 150+i*150, 200, (150+i*150 <= mx <= 150+i*150+120 and 200 <= my <= 360))
-        else: draw_text(screen, "CARD SELECTED", large_font, GREEN, 350, 250, center=True)
+            for i, card in enumerate(game.reward_choices):
+                cx = card_xs[i]
+                is_hov = cx <= mx <= cx+120 and card_y <= my <= card_y+160
+                draw_card(screen, card, cx, card_y, is_hov)
+        else:
+            pygame.draw.rect(screen, (20, 80, 20), (20, 105, 410, 175), border_radius=10)
+            pygame.draw.rect(screen, GREEN, (20, 105, 410, 175), 2, border_radius=10)
+            draw_text(screen, "✓ CARD SELECTED", large_font, GREEN, 225, 190, center=True)
+
+        # Divider
+        pygame.draw.line(screen, DARK_GRAY, (WIDTH//2, 75), (WIDTH//2, HEIGHT-80), 2)
+
+        # --- RIGHT SIDE: 3 passives ---
+        passive_x = WIDTH//2 + 20
+        passive_w = WIDTH//2 - 40
+        draw_text(screen, "CHOOSE 1 PASSIVE:", font, GOLD, WIDTH//2 + passive_w//2 + 20, 88, center=True)
         if not game.reward_passive_picked:
-            draw_text(screen, "CHOOSE 1 PASSIVE", font, WHITE, 750, 160, center=True)
             for i, passive in enumerate(game.elite_passive_choices):
-                draw_item_box(screen, passive.name, passive.description, 0, 650, 200+i*100, 200, 80,
-                              650 <= mx <= 850 and 200+i*100 <= my <= 280+i*100, show_cost=False)
-        else: draw_text(screen, "PASSIVE SELECTED", large_font, GREEN, 750, 250, center=True)
-        pygame.draw.rect(screen, GRAY, (WIDTH//2-100, 600, 200, 40), border_radius=5)
-        draw_text(screen, "CONTINUE / SKIP", font, BLACK, WIDTH//2, 620, center=True)
+                py = 110 + i * 95
+                is_hov = passive_x <= mx <= passive_x + passive_w and py <= my <= py + 80
+                draw_item_box(screen, passive.name, passive.description, 0, passive_x, py, passive_w, 80, is_hov, show_cost=False)
+        else:
+            pygame.draw.rect(screen, (20, 80, 20), (passive_x, 105, passive_w, 280), border_radius=10)
+            pygame.draw.rect(screen, GREEN, (passive_x, 105, passive_w, 280), 2, border_radius=10)
+            draw_text(screen, "✓ PASSIVE SELECTED", large_font, GREEN, passive_x + passive_w//2, 245, center=True)
+
+        # --- CONTINUE button ---
+        both_picked = game.reward_card_picked and game.reward_passive_picked
+        cont_hover = WIDTH//2-100 <= mx <= WIDTH//2+100 and HEIGHT-60 <= my <= HEIGHT-20
+        cont_color = (GREEN if cont_hover else (50, 180, 50)) if both_picked else DARK_GRAY
+        pygame.draw.rect(screen, cont_color, (WIDTH//2-100, HEIGHT-60, 200, 40), border_radius=5)
+        draw_text(screen, "CONTINUE" if both_picked else "Pick both first", font, WHITE if both_picked else GRAY, WIDTH//2, HEIGHT-40, center=True)
 
     # ===================== SHOP =====================
     elif game.mode == "SHOP":
