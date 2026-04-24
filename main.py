@@ -107,7 +107,7 @@ class CardTemplate:
     def __init__(self, name, cost, type, damage=0, range=0, fire_rate=0, hp=0,
                  aoe_radius=0, draw=0, energy_gain=0, exhaust=False,
                  description="", slows=False, piercing=False, chain=0,
-                 poisons=False, sticky=False):
+                 poisons=False, sticky=False, max_energy_gain=0):
         self.name, self.base_cost, self.cost = name, cost, cost
         self.type = type
         self.base_damage, self.damage = damage, damage
@@ -122,6 +122,7 @@ class CardTemplate:
         self.chain = chain
         self.poisons = poisons
         self.sticky = sticky
+        self.max_energy_gain = max_energy_gain
         self.description, self.upgraded = description, False
 
     def clone(self):
@@ -129,9 +130,9 @@ class CardTemplate:
                          self.range, self.fire_rate, self.base_hp, self.aoe_radius,
                          self.base_draw, self.base_energy_gain, self.exhaust,
                          self.description, self.slows, self.piercing, self.chain,
-                         self.poisons, self.sticky)
+                         self.poisons, self.sticky, self.max_energy_gain)
         c.upgraded, c.cost, c.damage, c.hp = self.upgraded, self.cost, self.damage, self.hp
-        c.draw_amount, c.energy_gain = self.draw_amount, self.energy_gain
+        c.draw_amount, c.energy_gain, c.max_energy_gain = self.draw_amount, self.energy_gain, self.max_energy_gain
         return c
 
     def upgrade(self):
@@ -139,19 +140,20 @@ class CardTemplate:
             self.upgraded, self.name = True, self.name + "+"
             if self.type == "TOWER":
                 self.damage += int(self.base_damage * 0.5)
-                if self.aoe_radius > 0: self.aoe_radius += 20
+                if self.aoe_radius > 0 and not self.sticky: self.aoe_radius += 20
                 if "Frost" in self.name: self.cost = 1; self.description = "Low damage. Slows enemies by 50%."
-                if "Sniper" in self.name: self.range += 30; self.description = "Pierces armor. Very slow."
+                if "Sniper" in self.name: self.cost = 1; self.description = "Pierces armor. Very slow."
                 if "Chain" in self.name: self.chain += 2; self.cost = 1; self.description = f"Arcs to {self.chain} nearby enemies."
                 if "Poison" in self.name: self.cost = 1; self.description = "Poisons target. 6 dmg/sec for 5s."
-                if "Sticky" in self.name: self.aoe_radius += 20; self.description = f"Slow cast. Nets radius {self.aoe_radius} for 6s."
+                if "Sticky" in self.name: self.cost = 1; self.fire_rate = int(self.fire_rate * 0.75); self.description = "Faster cast. Nets a radius for 4s."
             elif self.type == "WALL": self.hp += int(self.base_hp * 0.5)
             elif self.type == "SKILL":
                 if "Repair" in self.name:
-                    self.energy_gain += 1; self.cost = 0; self.description = "Heals base by 15 HP. Gain 1 Energy."
+                    self.energy_gain += 1; self.cost = 0; self.description = "Heals base by 20 HP. Gain 1 Energy."
                 elif "Quick Thinking" in self.name:
                     self.draw_amount = 2; self.energy_gain = 2; self.exhaust = True; self.description = "Draw 2. Gain 2 Energy. Exhaust."
                 elif "Brainstorm" in self.name: self.cost = 0
+                elif "Surge" in self.name: self.cost = 0; self.description = "+1 Max Energy this battle. Exhaust."
                 else: self.cost = max(0, self.cost - 1)
 
 def get_all_cards():
@@ -160,14 +162,15 @@ def get_all_cards():
         CardTemplate("Cannon",         2, "TOWER", damage=35, range=100, fire_rate=100, description="Heavy damage, slow."),
         CardTemplate("The Bomber",     2, "TOWER", damage=20, range=110, fire_rate=120, aoe_radius=60, description="Deals splash damage."),
         CardTemplate("Frost Tower",    2, "TOWER", damage=22,  range=110, fire_rate=50,  description="Slows enemies by 50%.", slows=True),
-        CardTemplate("Sniper Tower",   3, "TOWER", damage=100, range=120, fire_rate=250, description="Pierces armor. Very slow.", piercing=True),
+        CardTemplate("Sniper Tower",   2, "TOWER", damage=100, range=120, fire_rate=200, description="Pierces armor. Very slow.", piercing=True),
         CardTemplate("Chain Lightning",2, "TOWER", damage=25, range=110, fire_rate=80,  description="Arcs to 2 nearby enemies.", chain=2),
-        CardTemplate("Wooden Wall",    1, "WALL",  hp=50,  description="Blocks path. Has 50 HP."),
-        CardTemplate("Repair",         1, "SKILL", description="Heals base by 15 HP."),
+        CardTemplate("Wooden Wall",    1, "WALL",  hp=50,  description="Blocks path."),
+        CardTemplate("Repair",         1, "SKILL", description="Heals base by 20 HP."),
         CardTemplate("Quick Thinking", 0, "SKILL", draw=1,  energy_gain=1, description="Draw 1. Gain 1 Energy."),
         CardTemplate("Brainstorm",     1, "SKILL", draw=3,  energy_gain=1, exhaust=True, description="Draw 3. Gain 1 Energy. Exhaust."),
         CardTemplate("Poison Tower",   2, "TOWER", damage=8,  range=115, fire_rate=60,  description="Poisons target. 4 dmg/sec for 4s.", poisons=True),
-        CardTemplate("Sticky Tower",   2, "TOWER", damage=5,  range=110, fire_rate=360, aoe_radius=55, description="Slow cast. Nets a radius for 6s.", sticky=True),
+        CardTemplate("Sticky Tower",   2, "TOWER", damage=5,  range=110, fire_rate=360, aoe_radius=55, description="Slow cast. Nets a radius for 4s.", sticky=True),
+        CardTemplate("Surge",          2, "SKILL", energy_gain=0, exhaust=True, max_energy_gain=1, description="+1 Max Energy this battle. Exhaust."),
     ]
 
 # --- CLASS DEFINITIONS ---
@@ -176,29 +179,29 @@ CLASS_DEFS = {
         "name": "Mage",
         "color": CYAN,
         "desc": "Master of elemental towers. Controls the battlefield with frost and lightning.",
-        "detail": "2x Frost Tower, 2x Chain Lightning, 1x Repair, 1x Wooden Wall, 2x Quick Thinking, 2x Brainstorm",
-        "deck_indices": [3, 3, 5, 5, 7, 6, 8, 8, 9, 9],  # indices into get_all_cards()
+        "detail": "2x Frost Tower, 2x Chain Lightning, 1x Repair, 1x Wooden Wall, 2x Quick Thinking, 1x Brainstorm, 1x Surge",
+        "deck_indices": [3, 3, 5, 5, 7, 6, 8, 8, 9, 12],  # indices into get_all_cards()
     },
     "BOMBER": {
         "name": "Bomber",
         "color": ORANGE,
         "desc": "Explosive specialist. Obliterates groups with cannon fire and cluster bombs.",
-        "detail": "2x Cannon, 2x The Bomber, 1x Repair, 1x Wooden Wall, 2x Quick Thinking, 2x Brainstorm",
-        "deck_indices": [1, 1, 2, 2, 7, 6, 8, 8, 9, 9],
+        "detail": "2x Cannon, 2x The Bomber, 1x Repair, 1x Wooden Wall, 2x Quick Thinking, 1x Brainstorm, 1x Surge",
+        "deck_indices": [1, 1, 2, 2, 7, 6, 8, 8, 9, 12],
     },
     "ROGUE": {
         "name": "Rogue",
         "color": (200, 200, 80),
         "desc": "Swift and precise. Overwhelms enemies with rapid arrows and piercing shots.",
-        "detail": "2x Arrow Tower, 2x Sniper Tower, 1x Repair, 1x Wooden Wall, 2x Quick Thinking, 2x Brainstorm",
-        "deck_indices": [0, 0, 4, 4, 7, 6, 8, 8, 9, 9],
+        "detail": "2x Arrow Tower, 2x Sniper Tower, 1x Repair, 1x Wooden Wall, 2x Quick Thinking, 1x Brainstorm, 1x Surge",
+        "deck_indices": [0, 0, 4, 4, 7, 6, 8, 8, 9, 12],
     },
     "ALCHEMIST": {
         "name": "Alchemist",
         "color": (100, 220, 80),
         "desc": "Master of toxins and traps. Poisons enemies and webs groups to a crawl.",
-        "detail": "2x Poison Tower, 2x Sticky Tower, 1x Repair, 1x Wooden Wall, 2x Quick Thinking, 2x Brainstorm",
-        "deck_indices": [10, 10, 11, 11, 7, 6, 8, 8, 9, 9],
+        "detail": "2x Poison Tower, 2x Sticky Tower, 1x Repair, 1x Wooden Wall, 2x Quick Thinking, 1x Brainstorm, 1x Surge",
+        "deck_indices": [10, 10, 11, 11, 7, 6, 8, 8, 9, 12],
     },
 }
 
@@ -207,13 +210,13 @@ class Passive:
         self.id, self.name, self.cost, self.description = id, name, cost, description
 
 PASSIVE_DB = {
-    "ENG_1":    Passive("ENG_1",    "Energy Crystal",  100, "Start battles with +1 Max Energy."),
-    "HP_1":     Passive("HP_1",     "Iron Plating",     75, "+20 Max Base HP immediately."),
-    "DMG_1":    Passive("DMG_1",    "Sharpening Stone",120, "All towers do +5 damage."),
-    "GOLD_1":   Passive("GOLD_1",   "Golden Coin",     100, "Gain 20 extra gold after battles."),
-    "HARDENED": Passive("HARDENED", "Battle Hardened", 110, "Restore 5 Base HP after each wave."),
-    "OVERCHARGE":Passive("OVERCHARGE","Overcharge",     90, "First card played each battle costs 0 Energy."),
-    "SYNERGY":  Passive("SYNERGY",  "Twin Tactics",    120, "Same-type adjacent towers deal +10% damage."),
+    "ENG_1":      Passive("ENG_1",      "Energy Crystal", 100, "Start battles with +1 Max Energy."),
+    "OVERCHARGE": Passive("OVERCHARGE", "Overcharge",      90, "First card played each battle costs 0 Energy."),
+    "SYNERGY":    Passive("SYNERGY",    "Twin Tactics",   120, "Same-type adjacent towers deal +10% damage."),
+    "FORTIFIED":  Passive("FORTIFIED",  "Fortified",       90, "Walls have 2x HP."),
+    "QUICK_DRAW": Passive("QUICK_DRAW", "Quick Draw",     100, "Start each wave with 1 extra card in hand."),
+    "LAST_STAND": Passive("LAST_STAND", "Last Stand",     120, "Below 30 Base HP, all towers deal 2x damage."),
+    "PHOENIX":    Passive("PHOENIX",    "Phoenix",        110, "Start of each wave, return 1 exhausted card to draw pile."),
 }
 def get_all_passives(): return list(PASSIVE_DB.values())
 
@@ -322,12 +325,26 @@ class GameState:
 
         cards = get_all_cards()
         self.towers = [
-            Tower(1, 4, cards[0]), Tower(3, 6, cards[3]), Tower(5, 3, cards[1]),
-            Tower(7, 7, cards[3]), Tower(8, 4, cards[2]), Tower(11, 2, cards[3]),
-            Tower(13, 6, cards[0]), Tower(14, 3, cards[1]),
+            Tower(1, 1, cards[0]),  # Arrow Tower   - above path start
+            Tower(0, 1, cards[3]),  # Frost Tower   - top-left corner
+            Tower(2, 1, cards[1]),  # Cannon        - above horizontal run
+            Tower(4, 4, cards[10]), # Poison Tower  - beside vertical section
+            Tower(2, 3, cards[11]), # Sticky Tower  - beside vertical section
+            Tower(4, 6, cards[2]),  # The Bomber    - below mid path
+            Tower(6, 4, cards[5]),  # Chain Lightning - beside mid horizontal
+            Tower(6, 6, cards[0]),  # Arrow Tower   - below mid horizontal
+            Tower(8, 2, cards[4]),  # Sniper Tower  - above mid horizontal
+            Tower(9, 4, cards[3]),  # Frost Tower   - beside mid horizontal
+            Tower(10, 2, cards[1]), # Cannon        - above mid horizontal
+            Tower(11, 4, cards[10]),# Poison Tower  - beside mid horizontal
+            Tower(13, 5, cards[11]),# Sticky Tower  - beside vertical drop
+            Tower(13, 3, cards[5]), # Chain Lightning - beside vertical drop
+            Tower(14, 6, cards[4]), # Sniper Tower  - beside end path
+            Tower(15, 6, cards[2]), # The Bomber    - beside final stretch
         ]
         self.walls = {(7, 5): Wall(7, 5, 1000), (3, 5): Wall(3, 5, 1000)}
         self.enemies, self.lasers, self.explosions, self.spawn_timer = [], [], [], 0
+        self.sticky_nets = []  # [x, y, radius, frames_remaining]
         self.master_deck, self.passives, self.map_tiers = [], [], []
         self.base_max_hp, self.gold, self.base_hp = 100, 50, 100
         self.current_node, self.available_next_nodes = None, []
@@ -338,6 +355,8 @@ class GameState:
         self.shop_refresh_cost = 10
         self.reward_choices, self.elite_passive_choices = [], []
         self.reward_card_picked, self.reward_passive_picked = False, False
+        self.no_passives_available = False
+        self.reward_choices_bonus = []
         self.dragging_card, self.mouse_pos = None, (0, 0)
         self.deck_viewer_tab = "DRAW"
         self.deck_viewer_prev_mode = "BATTLE"
@@ -459,15 +478,16 @@ class GameState:
 
     def add_passive(self, passive_id):
         self.passives.append(passive_id)
-        if passive_id == "HP_1": self.base_max_hp += 20; self.base_hp += 20
-        elif passive_id == "ENG_1": self.max_energy += 1
+        if passive_id == "ENG_1": self.max_energy += 1
 
     def enter_battle(self, encounter_type):
         if encounter_type in ['ELITE', 'BOSS']: self.audio.play_bgm("ELITE_BOSS")
         else: self.audio.play_bgm("BATTLE")
 
-        self.towers.clear(); self.walls.clear(); self.enemies.clear(); self.explosions.clear()
-        self.wave, self.max_waves = 1, (4 if encounter_type == 'ELITE' else 3)
+        self.towers.clear(); self.walls.clear(); self.enemies.clear()
+        self.explosions.clear(); self.lasers.clear(); self.sticky_nets.clear()
+        self.max_energy = 3 + (1 if "ENG_1" in self.passives else 0)
+        self.wave, self.max_waves = 1, 4
         self.tutorial_active = (encounter_type == 'TUTORIAL' and self.loop_count == 0)
         self.tutorial_index = 0
         self.draw_pile = [c.clone() for c in self.master_deck]
@@ -498,12 +518,16 @@ class GameState:
 
     def start_turn(self):
         self.battle_phase = "PLANNING"
+        self.lasers.clear(); self.explosions.clear(); self.sticky_nets.clear()
         base_energy = self.max_energy - self._get_curse_energy_penalty()
         self.energy = max(1, base_energy)
         self.discard_pile.extend(self.hand); self.hand.clear(); self.draw_cards(5)
+        if "QUICK_DRAW" in self.passives: self.draw_cards(1)
+        if "PHOENIX" in self.passives and self.exhaust_pile:
+            card = random.choice(self.exhaust_pile)
+            self.exhaust_pile.remove(card)
+            self.draw_pile.append(card)
         self.enemies_to_spawn = []
-        if self.wave > 1 and "HARDENED" in self.passives:
-            self.base_hp = min(self.base_max_hp, self.base_hp + 5)
 
         if self.tutorial_active:
             hp_scale = 0.5
@@ -512,8 +536,14 @@ class GameState:
             else:                self.enemies_to_spawn = [Enemy("TANK", hp_scale)] + [Enemy("NORMAL", hp_scale) for _ in range(2)]
             return
 
+        # Wave 1 is always a simple warmup of basic normal enemies
+        if self.wave == 1:
+            for _ in range(random.randint(6, 10)):
+                self.enemies_to_spawn.append(Enemy("NORMAL"))
+            return
+
         hp_scale   = 0.8 + (self.current_node.tier * 0.25) + (self.loop_count * 2.0)
-        count      = 3 + self.wave * 2 + self.current_node.tier + (self.loop_count * 2)
+        count      = 3 + (self.wave - 1) * 2 + self.current_node.tier + (self.loop_count * 2)
         extra_armor = 4 if "ARMORED_ALL" in self.active_curses else 0
         speed_mult  = 1.3 if "FASTER_ENEMIES" in self.active_curses else 1.0
         double_swarm = "DOUBLE_SWARM" in self.active_curses
@@ -526,12 +556,12 @@ class GameState:
             if double_swarm:
                 self.enemies_to_spawn.append(make_enemy("SWARM"))
 
-        if self.current_node.type in ['ELITE', 'BOSS'] and self.wave in [2, 3]: count += 4
+        if self.current_node.type in ['ELITE', 'BOSS'] and self.wave in [3, 4]: count += 4
 
         if self.current_node.type == 'BOSS':
             boss_cycle = ["BOSS", "FLYING_BOSS", "SPLITTER_BOSS", "SHIELDED_BOSS"]
             boss_type  = boss_cycle[self.loop_count % len(boss_cycle)]
-            if self.wave == 3:
+            if self.wave == 4:
                 self.enemies_to_spawn.append(make_enemy(boss_type))
                 for _ in range(count):
                     etype = random.choices(["SWARM","TANK","FLYING","HEALER","SHIELDED","SPLITTER"], weights=[20,28,20,12,12,8])[0]
@@ -578,9 +608,10 @@ class GameState:
             self.towers.append(Tower(gx, gy, card))
         elif card.type == "WALL":
             if (gx, gy) not in PATH or (gx, gy) in self.walls: return False
-            self.walls[(gx, gy)] = Wall(gx, gy, card.hp)
+            wall_hp = card.hp * (2 if "FORTIFIED" in self.passives else 1)
+            self.walls[(gx, gy)] = Wall(gx, gy, wall_hp)
         elif card.type == "SKILL":
-            if "Repair" in card.name: self.base_hp = min(self.base_max_hp, self.base_hp + 15)
+            if "Repair" in card.name: self.base_hp = min(self.base_max_hp, self.base_hp + 20)
 
         self.energy -= actual_cost
         if "OVERCHARGE" in self.passives and not self.overcharge_used:
@@ -590,6 +621,8 @@ class GameState:
 
         if card.draw_amount > 0: self.draw_cards(card.draw_amount)
         if card.energy_gain > 0: self.energy += card.energy_gain
+        if card.max_energy_gain > 0:
+            self.max_energy += card.max_energy_gain
 
         if card.exhaust: self.exhaust_pile.append(card)
         else: self.discard_pile.append(card)
@@ -673,7 +706,8 @@ class GameState:
                 if e in self.enemies: self.enemies.remove(e)
 
         self.lasers.clear()
-        bonus_dmg = 5 if "DMG_1" in self.passives and not is_menu else 0
+        last_stand_active = "LAST_STAND" in self.passives and self.base_hp < 30 and not is_menu
+        bonus_dmg = 0
 
         # HEALER pulse logic
         for healer in self.enemies:
@@ -687,6 +721,16 @@ class GameState:
                                 other.hp = min(other.max_hp, other.hp + 8)
                     healer.heal_cooldown = 120
 
+        # Tick sticky nets — slow any enemy standing in one
+        for net in self.sticky_nets[:]:
+            net[3] -= 1
+            if net[3] <= 0:
+                self.sticky_nets.remove(net)
+            else:
+                for e in self.enemies:
+                    if math.hypot(e.x - net[0], e.y - net[1]) <= net[2]:
+                        e.slow_timer = max(e.slow_timer, 10)  # keep refreshed while inside
+
         for t in self.towers:
             if t.cooldown > 0: t.cooldown -= 1
             if t.cooldown <= 0:
@@ -694,16 +738,17 @@ class GameState:
                 if in_range:
                     target = in_range[0]
                     synergy_mult = self._get_synergy_multiplier(t) if not is_menu else 1.0
-                    total_dmg = int((t.template.damage + bonus_dmg) * synergy_mult)
+                    total_dmg = int((t.template.damage + bonus_dmg) * synergy_mult * (2 if last_stand_active else 1))
 
                     if t.template.aoe_radius > 0 and t.template.sticky:
-                        # Sticky Tower: net explosion — slows all in radius, tiny damage
+                        # Sticky Tower: drop a persistent net on the ground
                         self.audio.play_sfx("explode")
                         self.explosions.append([target.x, target.y, t.template.aoe_radius, 80, "sticky"])
+                        self.sticky_nets.append([target.x, target.y, t.template.aoe_radius, 240])  # 4s net
                         for splash in self.enemies:
                             if math.hypot(splash.x - target.x, splash.y - target.y) <= t.template.aoe_radius:
                                 splash.hp -= max(1, total_dmg)
-                                splash.slow_timer = 360  # 6 seconds at 60fps
+                                splash.slow_timer = 360
                     elif t.template.aoe_radius > 0:
                         self.audio.play_sfx("explode")
                         self.explosions.append([target.x, target.y, t.template.aoe_radius, 15])
@@ -772,6 +817,12 @@ class GameState:
         for c in self.reward_choices: c.upgrade()
         avail = [p for p in get_all_passives() if p.id not in self.passives]
         self.elite_passive_choices = random.sample(avail, min(3, len(avail)))
+        self.no_passives_available = len(avail) == 0
+        # If no passives left, offer a second upgraded card as bonus
+        self.reward_choices_bonus = []
+        if self.no_passives_available:
+            self.reward_choices_bonus = [c.clone() for c in random.sample(get_all_cards(), 3)]
+            for c in self.reward_choices_bonus: c.upgrade()
         self.reward_card_picked, self.reward_passive_picked = False, False
 
     def open_curse_reward(self):
@@ -808,7 +859,6 @@ class GameState:
 
             if not self.enemies and not self.enemies_to_spawn:
                 if self.wave >= self.max_waves:
-                    if "GOLD_1" in self.passives: self.gold += 20
                     self.audio.play_sfx("win")
 
                     if self.current_node.type == 'BOSS':
@@ -945,6 +995,14 @@ def draw_grid_and_entities(surf, game):
                  BLUE)))))))
         pygame.draw.circle(surf, color, (t.x, t.y), 20)
         pygame.draw.circle(surf, BLACK, (t.x, t.y), 20, 2)
+
+    # Draw persistent sticky nets on the ground (before enemies so they appear underneath)
+    for net in game.sticky_nets:
+        alpha = max(40, int(200 * net[3] / 360))
+        net_surf = pygame.Surface((net[2]*2, net[2]*2), pygame.SRCALPHA)
+        pygame.draw.circle(net_surf, (80, 220, 80, min(255, alpha+55)), (net[2], net[2]), net[2], 3)
+        pygame.draw.circle(net_surf, (40, 160, 40, alpha), (net[2], net[2]), net[2] - 8, 2)
+        surf.blit(net_surf, (int(net[0]) - net[2], int(net[1]) - net[2]))
 
     for e in game.enemies:
         pygame.draw.circle(surf, e.color, (int(e.x), int(e.y)), e.radius)
@@ -1092,6 +1150,10 @@ while running:
 
             # ---- CURSE REWARD ----
             elif game.mode == "CURSE_REWARD":
+                # Skip button
+                if WIDTH//2-75 <= mx <= WIDTH//2+75 and HEIGHT-55 <= my <= HEIGHT-20:
+                    game.audio.play_sfx("click"); game.curse_choice_made = True
+                    game.mode = "MAP"; game.audio.play_bgm("MAIN")
                 # Three options: top area = no curse (1 card), middle = 1 curse (2 cards), bottom = 2 curses (3 cards)
                 options = [
                     (1, 0, HEIGHT//2 - 200, "1 Card — No Curse"),
@@ -1113,18 +1175,9 @@ while running:
                         break
 
             # ---- REWARD (elite/boss) ----
-            elif game.mode == "REWARD":
-                if WIDTH//2-50 <= mx <= WIDTH//2+50 and 550 <= my <= 590:
-                    game.audio.play_sfx("click"); game.mode = "MAP"; game.audio.play_bgm("MAIN")
-                for i, card in enumerate(game.reward_choices):
-                    if 300+i*150 <= mx <= 300+i*150+120 and 300 <= my <= 460:
-                        game.audio.play_sfx("click")
-                        game.master_deck.append(card.clone()); game.mode = "MAP"
-                        game.audio.play_bgm("MAIN")
-
             elif game.mode == "ELITE_REWARD":
-                card_y = 110
-                card_xs = [30, 165, 300]
+                card_y = 90
+                card_xs = [20, 150, 280]
                 if not game.reward_card_picked:
                     for i, card in enumerate(game.reward_choices):
                         cx = card_xs[i]
@@ -1133,13 +1186,24 @@ while running:
                 if not game.reward_passive_picked:
                     passive_x = WIDTH//2 + 20
                     passive_w = WIDTH//2 - 40
-                    for i, passive in enumerate(game.elite_passive_choices):
-                        py = 110 + i * 95
-                        if passive_x <= mx <= passive_x + passive_w and py <= my <= py + 80:
-                            game.audio.play_sfx("click"); game.add_passive(passive.id); game.reward_passive_picked = True
-                # Continue button — only clickable once both rewards are picked
+                    if game.no_passives_available:
+                        bonus_xs = [passive_x, passive_x + 145, passive_x + 290]
+                        for i, card in enumerate(game.reward_choices_bonus):
+                            cx = bonus_xs[i]
+                            if cx <= mx <= cx+120 and card_y <= my <= card_y+160:
+                                game.audio.play_sfx("click"); game.master_deck.append(card.clone()); game.reward_passive_picked = True
+                    else:
+                        for i, passive in enumerate(game.elite_passive_choices):
+                            py = 90 + i * 90
+                            if passive_x <= mx <= passive_x + passive_w and py <= my <= py + 75:
+                                game.audio.play_sfx("click"); game.add_passive(passive.id); game.reward_passive_picked = True
+                # Skip Both
+                if WIDTH//2+20 <= mx <= WIDTH//2+220 and HEIGHT-60 <= my <= HEIGHT-20:
+                    game.audio.play_sfx("click")
+                    game.reward_card_picked = True; game.reward_passive_picked = True
+                # Continue
                 if game.reward_card_picked and game.reward_passive_picked:
-                    if WIDTH//2-100 <= mx <= WIDTH//2+100 and HEIGHT-60 <= my <= HEIGHT-20:
+                    if WIDTH//2-220 <= mx <= WIDTH//2-20 and HEIGHT-60 <= my <= HEIGHT-20:
                         game.audio.play_sfx("click")
                         if game.beat_boss_in_endless:
                             game.beat_boss_in_endless = False; game.loop_count += 1; game.generate_map()
@@ -1595,51 +1659,67 @@ while running:
             px = min(cbx, WIDTH - 130)
             py = oy - 175 if oy > HEIGHT // 2 else oy + 120
             draw_card(screen, card, px, py, True)
+        # Skip button
+        skip_hov = WIDTH//2-75 <= mx <= WIDTH//2+75 and HEIGHT-55 <= my <= HEIGHT-20
+        pygame.draw.rect(screen, GRAY if skip_hov else DARK_GRAY, (WIDTH//2-75, HEIGHT-55, 150, 35), border_radius=6)
+        draw_text(screen, "SKIP", font, WHITE, WIDTH//2, HEIGHT-37, center=True)
 
     # ===================== ELITE REWARD =====================
     elif game.mode == "ELITE_REWARD":
         is_boss_reward = game.current_node and game.current_node.type == 'BOSS'
-        title = "BOSS DEFEATED! CHOOSE 1 CARD & 1 PASSIVE" if is_boss_reward else "ELITE DEFEATED! CHOOSE 1 CARD & 1 PASSIVE"
-        draw_text(screen, title, large_font, GOLD, WIDTH//2, 35, center=True)
+        title = "BOSS DEFEATED!" if is_boss_reward else "ELITE DEFEATED!"
+        draw_text(screen, title, large_font, GOLD, WIDTH//2, 25, center=True)
 
+        card_y = 90
         # --- LEFT SIDE: 3 upgraded cards ---
-        # Cards are 120px wide; spread 3 cards centred in left half (x 0..500)
-        card_y = 110
-        card_xs = [30, 165, 300]
-        draw_text(screen, "CHOOSE 1 UPGRADED CARD:", font, GOLD, 220, 88, center=True)
+        draw_text(screen, "CHOOSE 1 UPGRADED CARD:", font, GOLD, 220, 70, center=True)
         if not game.reward_card_picked:
+            card_xs = [20, 150, 280]
             for i, card in enumerate(game.reward_choices):
                 cx = card_xs[i]
                 is_hov = cx <= mx <= cx+120 and card_y <= my <= card_y+160
                 draw_card(screen, card, cx, card_y, is_hov)
         else:
-            pygame.draw.rect(screen, (20, 80, 20), (20, 105, 410, 175), border_radius=10)
-            pygame.draw.rect(screen, GREEN, (20, 105, 410, 175), 2, border_radius=10)
-            draw_text(screen, "✓ CARD SELECTED", large_font, GREEN, 225, 190, center=True)
+            pygame.draw.rect(screen, (20, 80, 20), (20, 85, 400, 220), border_radius=10)
+            pygame.draw.rect(screen, GREEN, (20, 85, 400, 220), 2, border_radius=10)
+            draw_text(screen, "✓ DONE", large_font, GREEN, 220, 190, center=True)
 
         # Divider
-        pygame.draw.line(screen, DARK_GRAY, (WIDTH//2, 75), (WIDTH//2, HEIGHT-80), 2)
+        pygame.draw.line(screen, DARK_GRAY, (WIDTH//2, 60), (WIDTH//2, HEIGHT-80), 2)
 
-        # --- RIGHT SIDE: 3 passives ---
+        # --- RIGHT SIDE: passives or bonus cards ---
         passive_x = WIDTH//2 + 20
         passive_w = WIDTH//2 - 40
-        draw_text(screen, "CHOOSE 1 PASSIVE:", font, GOLD, WIDTH//2 + passive_w//2 + 20, 88, center=True)
-        if not game.reward_passive_picked:
-            for i, passive in enumerate(game.elite_passive_choices):
-                py = 110 + i * 95
-                is_hov = passive_x <= mx <= passive_x + passive_w and py <= my <= py + 80
-                draw_item_box(screen, passive.name, passive.description, 0, passive_x, py, passive_w, 80, is_hov, show_cost=False)
+        if game.no_passives_available:
+            draw_text(screen, "ALL PASSIVES OWNED — BONUS CARD:", font, GOLD, passive_x + passive_w//2, 70, center=True)
         else:
-            pygame.draw.rect(screen, (20, 80, 20), (passive_x, 105, passive_w, 280), border_radius=10)
-            pygame.draw.rect(screen, GREEN, (passive_x, 105, passive_w, 280), 2, border_radius=10)
-            draw_text(screen, "✓ PASSIVE SELECTED", large_font, GREEN, passive_x + passive_w//2, 245, center=True)
+            draw_text(screen, "CHOOSE 1 PASSIVE:", font, GOLD, passive_x + passive_w//2, 70, center=True)
+        if not game.reward_passive_picked:
+            if game.no_passives_available:
+                bonus_xs = [passive_x, passive_x + 145, passive_x + 290]
+                for i, card in enumerate(game.reward_choices_bonus):
+                    cx = bonus_xs[i]
+                    is_hov = cx <= mx <= cx+120 and card_y <= my <= card_y+160
+                    draw_card(screen, card, cx, card_y, is_hov)
+            else:
+                for i, passive in enumerate(game.elite_passive_choices):
+                    py = 90 + i * 90
+                    is_hov = passive_x <= mx <= passive_x + passive_w and py <= my <= py + 75
+                    draw_item_box(screen, passive.name, passive.description, 0, passive_x, py, passive_w, 75, is_hov, show_cost=False)
+        else:
+            pygame.draw.rect(screen, (20, 80, 20), (passive_x, 85, passive_w, 220), border_radius=10)
+            pygame.draw.rect(screen, GREEN, (passive_x, 85, passive_w, 220), 2, border_radius=10)
+            draw_text(screen, "✓ DONE", large_font, GREEN, passive_x + passive_w//2, 190, center=True)
 
-        # --- CONTINUE button ---
+        # --- Bottom buttons: CONTINUE (when both picked) + SKIP ---
         both_picked = game.reward_card_picked and game.reward_passive_picked
-        cont_hover = WIDTH//2-100 <= mx <= WIDTH//2+100 and HEIGHT-60 <= my <= HEIGHT-20
+        cont_hover = WIDTH//2-220 <= mx <= WIDTH//2-20 and HEIGHT-60 <= my <= HEIGHT-20
         cont_color = (GREEN if cont_hover else (50, 180, 50)) if both_picked else DARK_GRAY
-        pygame.draw.rect(screen, cont_color, (WIDTH//2-100, HEIGHT-60, 200, 40), border_radius=5)
-        draw_text(screen, "CONTINUE" if both_picked else "Pick both first", font, WHITE if both_picked else GRAY, WIDTH//2, HEIGHT-40, center=True)
+        pygame.draw.rect(screen, cont_color, (WIDTH//2-220, HEIGHT-60, 200, 40), border_radius=5)
+        draw_text(screen, "CONTINUE" if both_picked else "Pick first", font, WHITE if both_picked else GRAY, WIDTH//2-120, HEIGHT-40, center=True)
+        skip_both_hov = WIDTH//2+20 <= mx <= WIDTH//2+220 and HEIGHT-60 <= my <= HEIGHT-20
+        pygame.draw.rect(screen, GRAY if skip_both_hov else DARK_GRAY, (WIDTH//2+20, HEIGHT-60, 200, 40), border_radius=5)
+        draw_text(screen, "SKIP", font, WHITE, WIDTH//2+120, HEIGHT-40, center=True)
 
     # ===================== SHOP =====================
     elif game.mode == "SHOP":
@@ -1671,7 +1751,7 @@ while running:
                 draw_card(screen, card, cx, cy, (cx <= mx <= cx+120 and cy <= my <= cy+160))
         if game.shop_passive:
             draw_item_box(screen, game.shop_passive.name, game.shop_passive.description,
-                          game.shop_passive.cost, 650, 300, 200, 80, 650 <= mx <= 850 and 300 <= my <= 380)
+                          game.shop_passive.cost, 650, 300, 340, 80, 650 <= mx <= 990 and 300 <= my <= 380)
 
         pygame.draw.rect(screen, BLUE if 400 <= mx <= 600 and 500 <= my <= 545 else DARK_GRAY, (400,500,200,45), border_radius=5)
         draw_text(screen, f"Refresh Shop ({game.shop_refresh_cost}g)", font, WHITE, 500, 522, center=True)
@@ -1732,13 +1812,6 @@ while running:
             draw_card(screen, card, cx, cy, cx <= mx <= cx+120 and cy <= my <= cy+160)
 
     # ===================== REWARD =====================
-    elif game.mode == "REWARD":
-        draw_text(screen, "VICTORY! CHOOSE A REWARD", large_font, WHITE, WIDTH//2, 100, center=True)
-        for i, card in enumerate(game.reward_choices):
-            draw_card(screen, card, 300+i*150, 300, (300+i*150 <= mx <= 300+i*150+120 and 300 <= my <= 460))
-        pygame.draw.rect(screen, GRAY, (WIDTH//2-50, 550, 100, 40), border_radius=5)
-        draw_text(screen, "SKIP", font, BLACK, WIDTH//2, 570, center=True)
-
     # ===================== GAME OVER / WIN =====================
     elif game.mode in ["GAMEOVER", "WIN"]:
         msg = "GAME OVER" if game.mode == "GAMEOVER" else "YOU DEFENDED THE SPIRE!"
