@@ -269,6 +269,30 @@ class GameState:
         self.selected_class = None
         self.setup_menu()
 
+        # --- PNG Image loading ---
+        # Replace placeholder filenames with your actual .png file paths.
+        _image_files = {
+            "icon_tutorial": "icon_tutorial.png",   # 🎓  map node: tutorial
+            "icon_battle":   "icon_battle.png",     # ⚔️   map node: battle
+            "icon_elite":    "icon_elite.png",      # 💀  map node: elite
+            "icon_shop":     "icon_shop.png",       # 🛒  map node: shop
+            "icon_campfire": "icon_campfire.png",   # 🔥  map node: campfire
+            "icon_boss":     "icon_boss.png",       # 👑  map node: boss
+            "icon_heart":    "icon_heart.png",      # ♥   HUD: player HP
+            "icon_curse":    "icon_curse.png",      # ✦   HUD: active curse badge prefix
+            "icon_warning":  "icon_warning.png",    # ⚠   reward screen: curse warning badge
+            "icon_check":    "icon_check.png",      # ✓   reward screen: "DONE" checkmark
+            "icon_coin":     "icon_coin.png",        # ●   HUD: gold coin
+        }
+        self.images = {}
+        for key, path in _image_files.items():
+            if os.path.exists(path):
+                try:
+                    img = pygame.image.load(path).convert_alpha()
+                    self.images[key] = img
+                except pygame.error:
+                    pass  # file exists but failed to load — icon will be skipped
+
         self.tutorial_messages = [
             "NARRATOR: Welcome to Spire Defense! I'll be your guide. (Press SPACE to continue)",
             "NARRATOR: Your Base is at the end of the dirt path. If enemies touch it, you lose HP.",
@@ -1353,20 +1377,18 @@ while running:
         vsurf = pygame.Surface((WIDTH - MAP_SCROLLBAR_W, MAP_CANVAS_H))
         vsurf.fill((14, 14, 22))
 
-        # emoji font for node icons (larger)
-        emoji_font = pygame.font.SysFont("Segoe UI Emoji", 20, bold=True)
         label_font = pygame.font.SysFont("Arial", 13, bold=True)
 
-        # Node style: bg, border, emoji icon, icon color, display name
+        # Node style: bg, border, icon image key, icon color (unused with PNG), display name
         NODE_STYLE = {
-            'TUTORIAL': ((20, 35, 70),  (80, 140, 255),  "🎓", (180, 210, 255), "Tutorial"),
-            'BATTLE':   ((20, 45, 20),  (70, 210, 70),   "⚔️",  (160, 255, 160), "Battle"),
-            'ELITE':    ((65, 15, 15),  (220, 55, 55),   "💀", (255, 130, 130), "Elite"),
-            'SHOP':     ((55, 45, 5),   (255, 205, 0),   "🛒", (255, 230, 90),  "Shop"),
-            'CAMPFIRE': ((50, 28, 5),   (220, 120, 35),  "🔥", (255, 175, 70),  "Campfire"),
-            'BOSS':     ((55, 0, 55),   (210, 0, 210),   "👑", (255, 110, 255), "Boss"),
+            'TUTORIAL': ((20, 35, 70),  (80, 140, 255),  "icon_tutorial", (180, 210, 255), "Tutorial"),
+            'BATTLE':   ((20, 45, 20),  (70, 210, 70),   "icon_battle",   (160, 255, 160), "Battle"),
+            'ELITE':    ((65, 15, 15),  (220, 55, 55),   "icon_elite",    (255, 130, 130), "Elite"),
+            'SHOP':     ((55, 45, 5),   (255, 205, 0),   "icon_shop",     (255, 230, 90),  "Shop"),
+            'CAMPFIRE': ((50, 28, 5),   (220, 120, 35),  "icon_campfire", (255, 175, 70),  "Campfire"),
+            'BOSS':     ((55, 0, 55),   (210, 0, 210),   "icon_boss",     (255, 110, 255), "Boss"),
         }
-        NODE_R = 26
+        NODE_R = 34
 
         # --- Draw connections (straight line style) ---
         for tier in game.map_tiers:
@@ -1407,10 +1429,11 @@ while running:
                 bw = 3 if (is_available or is_current) else 2
                 pygame.draw.circle(vsurf, border_col, (node.x, node.y), NODE_R, bw)
 
-                # Emoji icon — centered in circle
-                icon_surf = emoji_font.render(icon, True, icon_col)
-                ir = icon_surf.get_rect(center=(node.x, node.y))
-                vsurf.blit(icon_surf, ir)
+                # PNG icon — centered in circle
+                if icon in game.images:
+                    icon_img = pygame.transform.smoothscale(game.images[icon], (40, 40))
+                    ir = icon_img.get_rect(center=(node.x, node.y))
+                    vsurf.blit(icon_img, ir)
 
                 # Label below node
                 lbl_surf = label_font.render(display_name, True, border_col)
@@ -1447,7 +1470,10 @@ while running:
         # -- HP --
         hp_ratio  = game.base_hp / max(1, game.base_max_hp)
         hp_col    = GREEN if hp_ratio > 0.5 else (ORANGE if hp_ratio > 0.25 else RED)
-        heart_surf = pygame.font.SysFont("Segoe UI Emoji", 18).render("♥", True, hp_col)
+        if "icon_heart" in game.images:
+            heart_surf = pygame.transform.smoothscale(game.images["icon_heart"], (28, 28))
+        else:
+            heart_surf = hud_font.render("HP", True, hp_col)
         hp_str     = f" {game.base_hp}/{game.base_max_hp}"
         hp_surf    = hud_font.render(hp_str, True, hp_col)
         cursor_x   = pad
@@ -1461,7 +1487,10 @@ while running:
         cursor_x += pad
 
         # -- Gold --
-        coin_surf  = pygame.font.SysFont("Segoe UI Emoji", 18).render("●", True, GOLD)
+        if "icon_coin" in game.images:
+            coin_surf = pygame.transform.smoothscale(game.images["icon_coin"], (28, 28))
+        else:
+            coin_surf = hud_font.render("G", True, GOLD)
         gold_str   = f" {game.gold}"
         if game.is_endless:
             gold_str += f"   Loop {game.loop_count + 1}"
@@ -1501,8 +1530,14 @@ while running:
             ch = bx <= mx <= bx + bw and by <= my <= by + bh
             pygame.draw.rect(screen, (70, 0, 70), (bx, by, bw, bh), border_radius=5)
             pygame.draw.rect(screen, (255, 80, 255) if ch else CURSE_COLOR, (bx, by, bw, bh), 1, border_radius=5)
-            skull_surf = hud_font.render(f"✦ {cname}", True, (255, 150, 255))
-            screen.blit(skull_surf, skull_surf.get_rect(midleft=(bx + 8, hud_y)))
+            if "icon_curse" in game.images:
+                curse_icon = pygame.transform.smoothscale(game.images["icon_curse"], (14, 14))
+                screen.blit(curse_icon, curse_icon.get_rect(midleft=(bx + 5, hud_y)))
+                skull_surf = hud_font.render(f" {cname}", True, (255, 150, 255))
+                screen.blit(skull_surf, skull_surf.get_rect(midleft=(bx + 22, hud_y)))
+            else:
+                skull_surf = hud_font.render(f"* {cname}", True, (255, 150, 255))
+                screen.blit(skull_surf, skull_surf.get_rect(midleft=(bx + 8, hud_y)))
             if ch:
                 map_curse_tooltip = (cname, cdesc, bx, MAP_HUD_H + 4)
 
@@ -1636,7 +1671,12 @@ while running:
                     ch = badge_x <= mx <= badge_x + badge_w and badge_y <= my <= badge_y + 24
                     pygame.draw.rect(screen, (80, 0, 80), (badge_x, badge_y, badge_w, 24), border_radius=5)
                     pygame.draw.rect(screen, (255, 80, 255) if ch else CURSE_COLOR, (badge_x, badge_y, badge_w, 24), 2, border_radius=5)
-                    draw_text(screen, f"⚠ {cname}", font, (255, 150, 255), badge_x + 6, badge_y + 4)
+                    if "icon_warning" in game.images:
+                        warn_icon = pygame.transform.smoothscale(game.images["icon_warning"], (12, 12))
+                        screen.blit(warn_icon, (badge_x + 6, badge_y + 6))
+                        draw_text(screen, f"  {cname}", font, (255, 150, 255), badge_x + 20, badge_y + 4)
+                    else:
+                        draw_text(screen, f"! {cname}", font, (255, 150, 255), badge_x + 6, badge_y + 4)
                     if ch:
                         curse_tooltip = (cname, cdesc, badge_x, badge_y + 30)
                         
@@ -1682,7 +1722,10 @@ while running:
         else:
             pygame.draw.rect(screen, (20, 80, 20), (20, 85, 400, 220), border_radius=10)
             pygame.draw.rect(screen, GREEN, (20, 85, 400, 220), 2, border_radius=10)
-            draw_text(screen, "✓ DONE", large_font, GREEN, 220, 190, center=True)
+            if "icon_check" in game.images:
+                chk = pygame.transform.smoothscale(game.images["icon_check"], (30, 30))
+                screen.blit(chk, chk.get_rect(center=(220 - 30, 190)))
+            draw_text(screen, " DONE", large_font, GREEN, 220, 190, center=True)
 
         # Divider
         pygame.draw.line(screen, DARK_GRAY, (WIDTH//2, 60), (WIDTH//2, HEIGHT-80), 2)
@@ -1709,7 +1752,10 @@ while running:
         else:
             pygame.draw.rect(screen, (20, 80, 20), (passive_x, 85, passive_w, 220), border_radius=10)
             pygame.draw.rect(screen, GREEN, (passive_x, 85, passive_w, 220), 2, border_radius=10)
-            draw_text(screen, "✓ DONE", large_font, GREEN, passive_x + passive_w//2, 190, center=True)
+            if "icon_check" in game.images:
+                chk = pygame.transform.smoothscale(game.images["icon_check"], (30, 30))
+                screen.blit(chk, chk.get_rect(center=(passive_x + passive_w//2 - 30, 190)))
+            draw_text(screen, " DONE", large_font, GREEN, passive_x + passive_w//2, 190, center=True)
 
         # --- Bottom buttons: CONTINUE (when both picked) + SKIP ---
         both_picked = game.reward_card_picked and game.reward_passive_picked
