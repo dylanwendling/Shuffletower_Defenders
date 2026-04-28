@@ -272,17 +272,16 @@ class GameState:
         # --- PNG Image loading ---
         # Replace placeholder filenames with your actual .png file paths.
         _image_files = {
-            "icon_tutorial": "icon_tutorial.png",   # 🎓  map node: tutorial
-            "icon_battle":   "icon_battle.png",     # ⚔️   map node: battle
-            "icon_elite":    "icon_elite.png",      # 💀  map node: elite
-            "icon_shop":     "icon_shop.png",       # 🛒  map node: shop
-            "icon_campfire": "icon_campfire.png",   # 🔥  map node: campfire
-            "icon_boss":     "icon_boss.png",       # 👑  map node: boss
-            "icon_heart":    "icon_heart.png",      # ♥   HUD: player HP
-            "icon_curse":    "icon_curse.png",      # ✦   HUD: active curse badge prefix
-            "icon_warning":  "icon_warning.png",    # ⚠   reward screen: curse warning badge
-            "icon_check":    "icon_check.png",      # ✓   reward screen: "DONE" checkmark
-            "icon_coin":     "icon_coin.png",        # ●   HUD: gold coin
+            "icon_tutorial": "icon_tutorial.png",   # map node: tutorial
+            "icon_battle":   "icon_battle.png",     # map node: battle
+            "icon_elite":    "icon_elite.png",      # map node: elite
+            "icon_shop":     "icon_shop.png",       # map node: shop
+            "icon_campfire": "icon_campfire.png",   # map node: campfire
+            "icon_boss":     "icon_boss.png",       # map node: boss
+            "icon_heart":    "icon_heart.png",      # HUD: player HP
+            "icon_warning":  "icon_warning.png",    # reward screen: curse warning badge
+            "icon_check":    "icon_check.png",      # reward screen: "DONE" checkmark
+            "icon_coin":     "icon_coin.png",        # HUD: gold coin
         }
         self.images = {}
         for key, path in _image_files.items():
@@ -1530,8 +1529,8 @@ while running:
             ch = bx <= mx <= bx + bw and by <= my <= by + bh
             pygame.draw.rect(screen, (70, 0, 70), (bx, by, bw, bh), border_radius=5)
             pygame.draw.rect(screen, (255, 80, 255) if ch else CURSE_COLOR, (bx, by, bw, bh), 1, border_radius=5)
-            if "icon_curse" in game.images:
-                curse_icon = pygame.transform.smoothscale(game.images["icon_curse"], (14, 14))
+            if "icon_warning" in game.images:
+                    curse_icon = pygame.transform.smoothscale(game.images["icon_warning"], (16, 16))
                 screen.blit(curse_icon, curse_icon.get_rect(midleft=(bx + 5, hud_y)))
                 skull_surf = hud_font.render(f" {cname}", True, (255, 150, 255))
                 screen.blit(skull_surf, skull_surf.get_rect(midleft=(bx + 22, hud_y)))
