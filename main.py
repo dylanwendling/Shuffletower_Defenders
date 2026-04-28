@@ -1,8 +1,11 @@
+# -*- coding: utf-8 -*-
+import asyncio
 import pygame
 import random
 import math
 import sys
 import os
+import functools
 
 # --- CONFIGURATION & CONSTANTS ---
 WIDTH, HEIGHT = 1000, 700
@@ -46,8 +49,8 @@ pygame.mixer.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Shuffle Tower Defense")
 clock = pygame.time.Clock()
-font = pygame.font.SysFont("Arial", 16, bold=True)
-large_font = pygame.font.SysFont("Arial", 32, bold=True)
+font = pygame.font.Font(None, 22)
+large_font = pygame.font.Font(None, 42)
 
 PATH = [(0,2), (1,2), (2,2), (3,2), (3,3), (3,4), (3,5), (4,5), (5,5), 
 		(6,5), (7,5), (7,4), (7,3), (8,3), (9,3), (10,3), (11,3), (12,3), 
@@ -144,7 +147,7 @@ class CardTemplate:
 				if "Frost" in self.name: self.cost = 1; self.description = "Low damage. Slows enemies by 50%."
 				if "Sniper" in self.name: self.cost = 1; self.description = "Pierces armor. Very slow."
 				if "Chain" in self.name: self.chain += 2; self.cost = 1; self.description = f"Arcs to {self.chain} nearby enemies."
-				if "Poison" in self.name: self.cost = 1; self.description = "Poisons target. 6 dmg/sec for 5s."
+				if "Poison" in self.name: self.cost = 1; self.description = "Poisons target. 6 dmg/sec."
 				if "Sticky" in self.name: self.cost = 1; self.fire_rate = int(self.fire_rate * 0.75); self.description = "Faster cast. Nets a radius for 4s."
 			elif self.type == "WALL": self.hp += int(self.base_hp * 0.5)
 			elif self.type == "SKILL":
@@ -163,12 +166,12 @@ def get_all_cards():
 		CardTemplate("The Bomber",     2, "TOWER", damage=20, range=110, fire_rate=120, aoe_radius=60, description="Deals splash damage."),
 		CardTemplate("Frost Tower",    2, "TOWER", damage=22,  range=110, fire_rate=50,  description="Slows enemies by 50%.", slows=True),
 		CardTemplate("Sniper Tower",   2, "TOWER", damage=100, range=120, fire_rate=200, description="Pierces armor. Very slow.", piercing=True),
-		CardTemplate("Chain Lightning",2, "TOWER", damage=25, range=110, fire_rate=80,  description="Arcs to 2 nearby enemies.", chain=2),
+		CardTemplate("Lightning Rod",2, "TOWER", damage=25, range=110, fire_rate=80,  description="Arcs to 2 nearby enemies.", chain=2),
 		CardTemplate("Wooden Wall",    1, "WALL",  hp=50,  description="Blocks path."),
 		CardTemplate("Repair",         1, "SKILL", description="Heals base by 20 HP."),
 		CardTemplate("Quick Thinking", 0, "SKILL", draw=1,  energy_gain=1, description="Draw 1. Gain 1 Energy."),
 		CardTemplate("Brainstorm",     1, "SKILL", draw=3,  energy_gain=1, exhaust=True, description="Draw 3. Gain 1 Energy. Exhaust."),
-		CardTemplate("Poison Tower",   2, "TOWER", damage=8,  range=115, fire_rate=60,  description="Poisons target. 4 dmg/sec for 4s.", poisons=True),
+		CardTemplate("Poison Tower",   2, "TOWER", damage=8,  range=115, fire_rate=60,  description="Poisons target. 4 dmg/sec.", poisons=True),
 		CardTemplate("Sticky Tower",   2, "TOWER", damage=5,  range=110, fire_rate=360, aoe_radius=55, description="Slow cast. Nets a radius for 4s.", sticky=True),
 		CardTemplate("Surge",          2, "SKILL", energy_gain=0, exhaust=True, max_energy_gain=1, description="+1 Max Energy this battle. Exhaust."),
 	]
@@ -270,7 +273,6 @@ class GameState:
 		self.setup_menu()
 
 		# --- PNG Image loading ---
-		# Replace placeholder filenames with your actual .png file paths.
 		_image_files = {
 			"icon_tutorial": "icon_tutorial.png",   # map node: tutorial
 			"icon_battle":   "icon_battle.png",     # map node: battle
@@ -279,9 +281,9 @@ class GameState:
 			"icon_campfire": "icon_campfire.png",   # map node: campfire
 			"icon_boss":     "icon_boss.png",       # map node: boss
 			"icon_heart":    "icon_heart.png",      # HUD: player HP
-			"icon_warning":  "icon_warning.png",    # reward screen: curse warning badge
+			"icon_warning":  "icon_warning.png",    # reward screen & HUD curse badge
 			"icon_check":    "icon_check.png",      # reward screen: "DONE" checkmark
-			"icon_coin":     "icon_coin.png",        # HUD: gold coin
+			"icon_coin":     "icon_coin.png",       # HUD: gold coin
 		}
 		self.images = {}
 		for key, path in _image_files.items():
@@ -905,8 +907,12 @@ class GameState:
 
 # --- RENDERING UTILS ---
 
+@functools.lru_cache(maxsize=1000)
+def _get_rendered_text(text, font, color):
+	return font.render(text, True, color)
+
 def draw_text(surf, text, font, color, x, y, center=False):
-	img = font.render(text, True, color)
+	img = _get_rendered_text(text, font, color)
 	rect = img.get_rect()
 	if center: rect.center = (x, y)
 	else:       rect.topleft = (x, y)
@@ -1066,848 +1072,873 @@ def draw_grid_and_entities(surf, game):
 
 # --- MAIN LOOP ---
 
-game = GameState()
-running = True
+async def main():
+	game = GameState()
+	running = True
 
-while running:
-	game.mouse_pos = pygame.mouse.get_pos()
-	mx, my = game.mouse_pos
+	while running:
+		game.mouse_pos = pygame.mouse.get_pos()
+		mx, my = game.mouse_pos
 
-	for event in pygame.event.get():
-		if event.type == pygame.QUIT: running = False
+		for event in pygame.event.get():
+			if event.type == pygame.QUIT: running = False
 
-		if event.type == pygame.KEYDOWN:
-			if event.key == pygame.K_ESCAPE and game.mode in ["BATTLE","MAP"]:
-				game.paused = not game.paused
+			if event.type == pygame.KEYDOWN:
+				if event.key == pygame.K_ESCAPE and game.mode in ["BATTLE","MAP"]:
+					game.paused = not game.paused
 
-			if event.key == pygame.K_SPACE and game.mode == "BATTLE" and game.tutorial_active:
-				if game.tutorial_index < len(game.tutorial_messages) - 1:
-					game.tutorial_index += 1
+				if event.key == pygame.K_SPACE and game.mode == "BATTLE" and game.tutorial_active:
+					if game.tutorial_index < len(game.tutorial_messages) - 1:
+						game.tutorial_index += 1
+						game.audio.play_sfx("click")
+
+				if event.key == pygame.K_SPACE and game.mode == "SHOP" and game.shopkeeper_index < len(game.shopkeeper_intro) - 1:
+					game.shopkeeper_index += 1
 					game.audio.play_sfx("click")
 
-			if event.key == pygame.K_SPACE and game.mode == "SHOP" and game.shopkeeper_index < len(game.shopkeeper_intro) - 1:
-				game.shopkeeper_index += 1
-				game.audio.play_sfx("click")
+			if event.type == pygame.MOUSEWHEEL and game.mode == "MAP":
+				scroll_area_h = HEIGHT - MAP_HUD_H - 50
+				max_scroll = max(0, MAP_CANVAS_H - scroll_area_h)
+				game.map_scroll = max(0, min(max_scroll, game.map_scroll - event.y * 40))
 
-		if event.type == pygame.MOUSEWHEEL and game.mode == "MAP":
-			scroll_area_h = HEIGHT - MAP_HUD_H - 50
-			max_scroll = max(0, MAP_CANVAS_H - scroll_area_h)
-			game.map_scroll = max(0, min(max_scroll, game.map_scroll - event.y * 40))
-
-		if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-			if game.paused:
-				game.audio.play_sfx("click")
-				if WIDTH//2-100 <= mx <= WIDTH//2+100 and HEIGHT//2-30 <= my <= HEIGHT//2+20: game.paused = False
-				if WIDTH//2-100 <= mx <= WIDTH//2+100 and HEIGHT//2+40 <= my <= HEIGHT//2+90: game.setup_menu()
-				continue
-
-			# ---- MENU ----
-			if game.mode == "MENU":
-				if WIDTH//2-150 <= mx <= WIDTH//2+150:
-					if HEIGHT//2-40 <= my <= HEIGHT//2+20:
-						game.audio.play_sfx("click")
-						game.is_endless = False; game.mode = "CLASS_SELECT"
-					elif HEIGHT//2+40 <= my <= HEIGHT//2+100:
-						game.audio.play_sfx("click")
-						game.is_endless = True; game.mode = "CLASS_SELECT"
-
-			# ---- CLASS SELECT ----
-			elif game.mode == "CLASS_SELECT":
-				class_keys = list(CLASS_DEFS.keys())
-				card_w, card_h, gap = 220, 300, 12
-				total_w = len(class_keys) * card_w + (len(class_keys) - 1) * gap
-				start_x = WIDTH//2 - total_w//2
-				for i, ckey in enumerate(class_keys):
-					bx = start_x + i * (card_w + gap)
-					by = HEIGHT//2 - card_h//2
-					if bx <= mx <= bx+card_w and by <= my <= by+card_h:
-						game.audio.play_sfx("click")
-						game.start_run(ckey)
-						break
-				# Back button
-				if 20 <= mx <= 130 and 20 <= my <= 55:
+			if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+				if game.paused:
 					game.audio.play_sfx("click")
-					game.mode = "MENU"
+					if WIDTH//2-100 <= mx <= WIDTH//2+100 and HEIGHT//2-30 <= my <= HEIGHT//2+20: game.paused = False
+					if WIDTH//2-100 <= mx <= WIDTH//2+100 and HEIGHT//2+40 <= my <= HEIGHT//2+90: game.setup_menu()
+					continue
 
-			# ---- MAP ----
-			elif game.mode == "MAP":
-				if 20 <= mx <= 160 and HEIGHT-45 <= my <= HEIGHT-15:
-					game.audio.play_sfx("click")
-					game.deck_viewer_tab = "DRAW"
-					game.deck_viewer_prev_mode = "MAP"
-					game.mode = "DECK_VIEWER"
-				else:
-					# Convert screen coords to virtual canvas coords
-					scroll_area_h = HEIGHT - MAP_HUD_H - 50
-					virtual_my = my + game.map_scroll - MAP_HUD_H
-					for node in game.available_next_nodes:
-						if math.hypot(mx - node.x, virtual_my - node.y) < 25:
+				# ---- MENU ----
+				if game.mode == "MENU":
+					if WIDTH//2-150 <= mx <= WIDTH//2+150:
+						if HEIGHT//2-40 <= my <= HEIGHT//2+20:
 							game.audio.play_sfx("click")
-							game.select_node(node); break
+							game.is_endless = False; game.mode = "CLASS_SELECT"
+						elif HEIGHT//2+40 <= my <= HEIGHT//2+100:
+							game.audio.play_sfx("click")
+							game.is_endless = True; game.mode = "CLASS_SELECT"
 
-			# ---- BATTLE ----
-			elif game.mode == "BATTLE" and game.battle_phase == "PLANNING":
-				if WIDTH-150 <= mx <= WIDTH-20 and 20 <= my <= 60:
-					if not game.towers and not game.confirm_wave:
-						game.confirm_wave = True
+				# ---- CLASS SELECT ----
+				elif game.mode == "CLASS_SELECT":
+					class_keys = list(CLASS_DEFS.keys())
+					card_w, card_h, gap = 220, 300, 12
+					total_w = len(class_keys) * card_w + (len(class_keys) - 1) * gap
+					start_x = WIDTH//2 - total_w//2
+					for i, ckey in enumerate(class_keys):
+						bx = start_x + i * (card_w + gap)
+						by = HEIGHT//2 - card_h//2
+						if bx <= mx <= bx+card_w and by <= my <= by+card_h:
+							game.audio.play_sfx("click")
+							game.start_run(ckey)
+							break
+					# Back button
+					if 20 <= mx <= 130 and 20 <= my <= 55:
 						game.audio.play_sfx("click")
+						game.mode = "MENU"
+
+				# ---- MAP ----
+				elif game.mode == "MAP":
+					if 20 <= mx <= 160 and HEIGHT-45 <= my <= HEIGHT-15:
+						game.audio.play_sfx("click")
+						game.deck_viewer_tab = "DRAW"
+						game.deck_viewer_prev_mode = "MAP"
+						game.mode = "DECK_VIEWER"
 					else:
-						game.audio.play_sfx("click")
-						game.battle_phase = "ACTION"
-						game.confirm_wave = False
-				elif game.confirm_wave:
-					if WIDTH//2-120 <= mx <= WIDTH//2-10 and HEIGHT//2+20 <= my <= HEIGHT//2+60:
-						game.audio.play_sfx("click"); game.battle_phase = "ACTION"; game.confirm_wave = False
-					elif WIDTH//2+10 <= mx <= WIDTH//2+120 and HEIGHT//2+20 <= my <= HEIGHT//2+60:
-						game.audio.play_sfx("click"); game.confirm_wave = False
-				if 18 <= mx <= 163 and HEIGHT-83 <= my <= HEIGHT-58:
-					game.audio.play_sfx("click")
-					game.deck_viewer_tab = "DRAW"
-					game.deck_viewer_prev_mode = "BATTLE"
-					game.mode = "DECK_VIEWER"
-				hand_x = WIDTH//2 - (len(game.hand)*130)//2
-				for i, card in enumerate(game.hand):
-					cx, cy = hand_x + i*130, HEIGHT-180
-					if cx <= mx <= cx+120 and cy <= my <= cy+160:
-						game.audio.play_sfx("click"); game.dragging_card = card; break
+						# Convert screen coords to virtual canvas coords
+						scroll_area_h = HEIGHT - MAP_HUD_H - 50
+						virtual_my = my + game.map_scroll - MAP_HUD_H
+						for node in game.available_next_nodes:
+							if math.hypot(mx - node.x, virtual_my - node.y) < 25:
+								game.audio.play_sfx("click")
+								game.select_node(node); break
 
-			# ---- CURSE REWARD ----
-			elif game.mode == "CURSE_REWARD":
-				# Skip button
-				if WIDTH//2-75 <= mx <= WIDTH//2+75 and HEIGHT-55 <= my <= HEIGHT-20:
-					game.audio.play_sfx("click"); game.curse_choice_made = True
-					game.mode = "MAP"; game.audio.play_bgm("MAIN")
-				# Three options: top area = no curse (1 card), middle = 1 curse (2 cards), bottom = 2 curses (3 cards)
-				options = [
-					(1, 0, HEIGHT//2 - 200, "1 Card — No Curse"),
-					(2, 1, HEIGHT//2 - 60,  "2 Cards — 1 Curse"),
-					(3, 2, HEIGHT//2 + 80,  "3 Cards — 2 Curses"),
-				]
-				for num_cards, num_curses, oy, label in options:
-					if WIDTH//2 - 280 <= mx <= WIDTH//2 + 280 and oy <= my <= oy + 110:
+				# ---- BATTLE ----
+				elif game.mode == "BATTLE" and game.battle_phase == "PLANNING":
+					if WIDTH-150 <= mx <= WIDTH-20 and 20 <= my <= 60:
+						if not game.towers and not game.confirm_wave:
+							game.confirm_wave = True
+							game.audio.play_sfx("click")
+						else:
+							game.audio.play_sfx("click")
+							game.battle_phase = "ACTION"
+							game.confirm_wave = False
+					elif game.confirm_wave:
+						if WIDTH//2-120 <= mx <= WIDTH//2-10 and HEIGHT//2+20 <= my <= HEIGHT//2+60:
+							game.audio.play_sfx("click"); game.battle_phase = "ACTION"; game.confirm_wave = False
+						elif WIDTH//2+10 <= mx <= WIDTH//2+120 and HEIGHT//2+20 <= my <= HEIGHT//2+60:
+							game.audio.play_sfx("click"); game.confirm_wave = False
+					if 18 <= mx <= 163 and HEIGHT-83 <= my <= HEIGHT-58:
 						game.audio.play_sfx("click")
-						# Add the exact cards shown on screen (first N from the list)
-						for c in game.curse_reward_cards[:num_cards]:
-							game.master_deck.append(c.clone())
-						# Add curses as pending for the next battle
-						for _ in range(num_curses):
-							game.pending_curses.append(game._next_curse())
-						game.curse_choice_made = True
-						game.mode = "MAP"
-						game.audio.play_bgm("MAIN")
-						break
+						game.deck_viewer_tab = "DRAW"
+						game.deck_viewer_prev_mode = "BATTLE"
+						game.mode = "DECK_VIEWER"
+					hand_x = WIDTH//2 - (len(game.hand)*130)//2
+					for i, card in enumerate(game.hand):
+						cx, cy = hand_x + i*130, HEIGHT-180
+						if cx <= mx <= cx+120 and cy <= my <= cy+160:
+							game.audio.play_sfx("click"); game.dragging_card = card; break
 
-			# ---- REWARD (elite/boss) ----
-			elif game.mode == "ELITE_REWARD":
-				card_y = 90
-				card_xs = [20, 150, 280]
-				if not game.reward_card_picked:
-					for i, card in enumerate(game.reward_choices):
-						cx = card_xs[i]
-						if cx <= mx <= cx+120 and card_y <= my <= card_y+160:
-							game.audio.play_sfx("click"); game.master_deck.append(card.clone()); game.reward_card_picked = True
-				if not game.reward_passive_picked:
-					passive_x = WIDTH//2 + 20
-					passive_w = WIDTH//2 - 40
-					if game.no_passives_available:
-						bonus_xs = [passive_x, passive_x + 145, passive_x + 290]
-						for i, card in enumerate(game.reward_choices_bonus):
-							cx = bonus_xs[i]
-							if cx <= mx <= cx+120 and card_y <= my <= card_y+160:
-								game.audio.play_sfx("click"); game.master_deck.append(card.clone()); game.reward_passive_picked = True
-					else:
-						for i, passive in enumerate(game.elite_passive_choices):
-							py = 90 + i * 90
-							if passive_x <= mx <= passive_x + passive_w and py <= my <= py + 75:
-								game.audio.play_sfx("click"); game.add_passive(passive.id); game.reward_passive_picked = True
-				# Skip Both
-				if WIDTH//2+20 <= mx <= WIDTH//2+220 and HEIGHT-60 <= my <= HEIGHT-20:
-					game.audio.play_sfx("click")
-					game.reward_card_picked = True; game.reward_passive_picked = True
-				# Continue
-				if game.reward_card_picked and game.reward_passive_picked:
-					if WIDTH//2-220 <= mx <= WIDTH//2-20 and HEIGHT-60 <= my <= HEIGHT-20:
-						game.audio.play_sfx("click")
-						if game.beat_boss_in_endless:
-							game.beat_boss_in_endless = False; game.loop_count += 1; game.generate_map()
+				# ---- CURSE REWARD ----
+				elif game.mode == "CURSE_REWARD":
+					# Skip button
+					if WIDTH//2-75 <= mx <= WIDTH//2+75 and HEIGHT-55 <= my <= HEIGHT-20:
+						game.audio.play_sfx("click"); game.curse_choice_made = True
 						game.mode = "MAP"; game.audio.play_bgm("MAIN")
-
-			elif game.mode == "SHOP":
-				if 400 <= mx <= 600 and 610 <= my <= 655:
-					game.audio.play_sfx("click"); game.mode = "MAP"; game.audio.play_bgm("MAIN")
-				elif not game.purge_used and 400 <= mx <= 600 and 555 <= my <= 600:
-					game.audio.play_sfx("click")
-					game.purge_cards = random.sample(game.master_deck, min(3, len(game.master_deck)))
-					game.mode = "SHOP_PURGE"
-				elif 400 <= mx <= 600 and 500 <= my <= 545:
-					if game.gold >= game.shop_refresh_cost:
-						game.audio.play_sfx("click"); game.gold -= game.shop_refresh_cost
-						game.shop_refresh_cost += 10; game.refresh_shop_items()
-				for i, card in enumerate(game.shop_cards):
-					if card and 150+i*150 <= mx <= 150+i*150+120 and 300 <= my <= 460:
-						if game.gold >= 50:
-							game.audio.play_sfx("click"); game.gold -= 50
-							game.master_deck.append(card.clone()); game.shop_cards[i] = None
-				if game.shop_passive and 650 <= mx <= 850 and 300 <= my <= 380:
-					if game.gold >= game.shop_passive.cost:
-						game.audio.play_sfx("click"); game.gold -= game.shop_passive.cost
-						game.add_passive(game.shop_passive.id); game.shop_passive = None
-
-			elif game.mode == "SHOP_PURGE":
-				if WIDTH//2-100 <= mx <= WIDTH//2+100 and HEIGHT-70 <= my <= HEIGHT-30:
-					game.audio.play_sfx("click"); game.purge_used = True; game.mode = "SHOP"
-				for i, card in enumerate(game.purge_cards):
-					cx = 200 + i*220; cy = 280
-					if cx <= mx <= cx+120 and cy <= my <= cy+160:
-						if card and card in game.master_deck:
+					# Three options: top area = no curse (1 card), middle = 1 curse (2 cards), bottom = 2 curses (3 cards)
+					options = [
+						(1, 0, HEIGHT//2 - 200, "1 Card — No Curse"),
+						(2, 1, HEIGHT//2 - 60,  "2 Cards — 1 Curse"),
+						(3, 2, HEIGHT//2 + 80,  "3 Cards — 2 Curses"),
+					]
+					for num_cards, num_curses, oy, label in options:
+						if WIDTH//2 - 280 <= mx <= WIDTH//2 + 280 and oy <= my <= oy + 110:
 							game.audio.play_sfx("click")
-							sell_price = 75 if card.upgraded else 25
-							game.gold += sell_price
-							game.master_deck.remove(card)
-							game.purge_cards[i] = None
-						break
+							# Add the exact cards shown on screen (first N from the list)
+							for c in game.curse_reward_cards[:num_cards]:
+								game.master_deck.append(c.clone())
+							# Add curses as pending for the next battle
+							for _ in range(num_curses):
+								game.pending_curses.append(game._next_curse())
+							game.curse_choice_made = True
+							game.mode = "MAP"
+							game.audio.play_bgm("MAIN")
+							break
 
-			elif game.mode == "CAMPFIRE":
-				if 200 <= mx <= 350 and 300 <= my <= 400:
-					game.audio.play_sfx("click"); game.base_hp = min(game.base_max_hp, game.base_hp + 30)
-					game.mode = "MAP"; game.audio.play_bgm("MAIN")
-				if 425 <= mx <= 575 and 300 <= my <= 400:
-					game.audio.play_sfx("click"); game.mode = "CAMPFIRE_SMITH"
-				if 650 <= mx <= 800 and 300 <= my <= 400:
-					game.audio.play_sfx("click"); game.mode = "CAMPFIRE_COPY"
+				# ---- REWARD (elite/boss) ----
+				elif game.mode == "ELITE_REWARD":
+					card_y = 90
+					card_xs = [20, 150, 280]
+					if not game.reward_card_picked:
+						for i, card in enumerate(game.reward_choices):
+							cx = card_xs[i]
+							if cx <= mx <= cx+120 and card_y <= my <= card_y+160:
+								game.audio.play_sfx("click"); game.master_deck.append(card.clone()); game.reward_card_picked = True
+					if not game.reward_passive_picked:
+						passive_x = WIDTH//2 + 20
+						passive_w = WIDTH//2 - 40
+						if game.no_passives_available:
+							bonus_xs = [passive_x, passive_x + 145, passive_x + 290]
+							for i, card in enumerate(game.reward_choices_bonus):
+								cx = bonus_xs[i]
+								if cx <= mx <= cx+120 and card_y <= my <= card_y+160:
+									game.audio.play_sfx("click"); game.master_deck.append(card.clone()); game.reward_passive_picked = True
+						else:
+							for i, passive in enumerate(game.elite_passive_choices):
+								py = 90 + i * 90
+								if passive_x <= mx <= passive_x + passive_w and py <= my <= py + 75:
+									game.audio.play_sfx("click"); game.add_passive(passive.id); game.reward_passive_picked = True
+					# Skip Both
+					if WIDTH//2+20 <= mx <= WIDTH//2+220 and HEIGHT-60 <= my <= HEIGHT-20:
+						game.audio.play_sfx("click")
+						game.reward_card_picked = True; game.reward_passive_picked = True
+					# Continue
+					if game.reward_card_picked and game.reward_passive_picked:
+						if WIDTH//2-220 <= mx <= WIDTH//2-20 and HEIGHT-60 <= my <= HEIGHT-20:
+							game.audio.play_sfx("click")
+							if game.beat_boss_in_endless:
+								game.beat_boss_in_endless = False; game.loop_count += 1; game.generate_map()
+							game.mode = "MAP"; game.audio.play_bgm("MAIN")
 
-			elif game.mode == "CAMPFIRE_SMITH":
-				for i, card in enumerate(game.master_deck):
-					if not card.upgraded:
+				elif game.mode == "SHOP":
+					if 400 <= mx <= 600 and 610 <= my <= 655:
+						game.audio.play_sfx("click"); game.mode = "MAP"; game.audio.play_bgm("MAIN")
+					elif not game.purge_used and 400 <= mx <= 600 and 555 <= my <= 600:
+						game.audio.play_sfx("click")
+						game.purge_cards = random.sample(game.master_deck, min(3, len(game.master_deck)))
+						game.mode = "SHOP_PURGE"
+					elif 400 <= mx <= 600 and 500 <= my <= 545:
+						if game.gold >= game.shop_refresh_cost:
+							game.audio.play_sfx("click"); game.gold -= game.shop_refresh_cost
+							game.shop_refresh_cost += 10; game.refresh_shop_items()
+					for i, card in enumerate(game.shop_cards):
+						if card and 150+i*150 <= mx <= 150+i*150+120 and 300 <= my <= 460:
+							if game.gold >= 50:
+								game.audio.play_sfx("click"); game.gold -= 50
+								game.master_deck.append(card.clone()); game.shop_cards[i] = None
+					if game.shop_passive and 650 <= mx <= 850 and 300 <= my <= 380:
+						if game.gold >= game.shop_passive.cost:
+							game.audio.play_sfx("click"); game.gold -= game.shop_passive.cost
+							game.add_passive(game.shop_passive.id); game.shop_passive = None
+
+				elif game.mode == "SHOP_PURGE":
+					if WIDTH//2-100 <= mx <= WIDTH//2+100 and HEIGHT-70 <= my <= HEIGHT-30:
+						game.audio.play_sfx("click"); game.purge_used = True; game.mode = "SHOP"
+					for i, card in enumerate(game.purge_cards):
+						cx = 200 + i*220; cy = 280
+						if cx <= mx <= cx+120 and cy <= my <= cy+160:
+							if card and card in game.master_deck:
+								game.audio.play_sfx("click")
+								sell_price = 75 if card.upgraded else 25
+								game.gold += sell_price
+								game.master_deck.remove(card)
+								game.purge_cards[i] = None
+							break
+
+				elif game.mode == "CAMPFIRE":
+					if 200 <= mx <= 350 and 300 <= my <= 400:
+						game.audio.play_sfx("click"); game.base_hp = min(game.base_max_hp, game.base_hp + 30)
+						game.mode = "MAP"; game.audio.play_bgm("MAIN")
+					if 425 <= mx <= 575 and 300 <= my <= 400:
+						game.audio.play_sfx("click"); game.mode = "CAMPFIRE_SMITH"
+					if 650 <= mx <= 800 and 300 <= my <= 400:
+						game.audio.play_sfx("click"); game.mode = "CAMPFIRE_COPY"
+
+				elif game.mode == "CAMPFIRE_SMITH":
+					for i, card in enumerate(game.master_deck):
+						if not card.upgraded:
+							cx, cy = 20 + (i%6)*130, 150 + (i//6)*170
+							if cx <= mx <= cx+120 and cy <= my <= cy+160:
+								game.audio.play_sfx("click"); card.upgrade()
+								game.mode = "MAP"; game.audio.play_bgm("MAIN"); break
+
+				elif game.mode == "CAMPFIRE_COPY":
+					for i, card in enumerate(game.master_deck):
 						cx, cy = 20 + (i%6)*130, 150 + (i//6)*170
 						if cx <= mx <= cx+120 and cy <= my <= cy+160:
-							game.audio.play_sfx("click"); card.upgrade()
+							game.audio.play_sfx("click"); game.master_deck.append(card.clone())
 							game.mode = "MAP"; game.audio.play_bgm("MAIN"); break
 
-			elif game.mode == "CAMPFIRE_COPY":
-				for i, card in enumerate(game.master_deck):
-					cx, cy = 20 + (i%6)*130, 150 + (i//6)*170
-					if cx <= mx <= cx+120 and cy <= my <= cy+160:
-						game.audio.play_sfx("click"); game.master_deck.append(card.clone())
-						game.mode = "MAP"; game.audio.play_bgm("MAIN"); break
+				elif game.mode in ["GAMEOVER", "WIN"]:
+					game.setup_menu()
 
-			elif game.mode in ["GAMEOVER", "WIN"]:
-				game.setup_menu()
+				elif game.mode == "DECK_VIEWER":
+					if 20 <= my <= 55:
+						if 20 <= mx <= 140:  game.deck_viewer_tab = "DRAW";    game.audio.play_sfx("click")
+						elif 150 <= mx <= 290: game.deck_viewer_tab = "DISCARD"; game.audio.play_sfx("click")
+						elif 300 <= mx <= 420: game.deck_viewer_tab = "EXHAUST"; game.audio.play_sfx("click")
+					if WIDTH-130 <= mx <= WIDTH-20 and 20 <= my <= 55:
+						game.audio.play_sfx("click")
+						game.mode = game.deck_viewer_prev_mode if game.deck_viewer_prev_mode in ["MAP","BATTLE"] else "BATTLE"
 
-			elif game.mode == "DECK_VIEWER":
-				if 20 <= my <= 55:
-					if 20 <= mx <= 140:  game.deck_viewer_tab = "DRAW";    game.audio.play_sfx("click")
-					elif 150 <= mx <= 290: game.deck_viewer_tab = "DISCARD"; game.audio.play_sfx("click")
-					elif 300 <= mx <= 420: game.deck_viewer_tab = "EXHAUST"; game.audio.play_sfx("click")
-				if WIDTH-130 <= mx <= WIDTH-20 and 20 <= my <= 55:
-					game.audio.play_sfx("click")
-					game.mode = game.deck_viewer_prev_mode if game.deck_viewer_prev_mode in ["MAP","BATTLE"] else "BATTLE"
+			elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+				if game.dragging_card:
+					if MAP_OFFSET_X <= mx <= MAP_OFFSET_X+COLS*GRID_SIZE and MAP_OFFSET_Y <= my <= MAP_OFFSET_Y+ROWS*GRID_SIZE:
+						gx = (mx - MAP_OFFSET_X) // GRID_SIZE
+						gy = (my - MAP_OFFSET_Y) // GRID_SIZE
+						game.play_card(game.dragging_card, gx, gy)
+					game.dragging_card = None
 
-		elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
-			if game.dragging_card:
-				if MAP_OFFSET_X <= mx <= MAP_OFFSET_X+COLS*GRID_SIZE and MAP_OFFSET_Y <= my <= MAP_OFFSET_Y+ROWS*GRID_SIZE:
-					gx = (mx - MAP_OFFSET_X) // GRID_SIZE
-					gy = (my - MAP_OFFSET_Y) // GRID_SIZE
-					game.play_card(game.dragging_card, gx, gy)
-				game.dragging_card = None
+		# --- UPDATE ---
+		if game.mode == "BATTLE": game.update_battle()
+		elif game.mode == "MENU": game.update_menu()
 
-	# --- UPDATE ---
-	if game.mode == "BATTLE": game.update_battle()
-	elif game.mode == "MENU": game.update_menu()
+		# --- DRAW ---
+		screen.fill((30, 30, 40))
 
-	# --- DRAW ---
-	screen.fill((30, 30, 40))
+		# ===================== MENU =====================
+		if game.mode == "MENU":
+			draw_grid_and_entities(screen, game)
+			overlay = pygame.Surface((WIDTH, HEIGHT)); overlay.set_alpha(150); overlay.fill(BLACK); screen.blit(overlay, (0,0))
+			draw_text(screen, "SHUFFLE TOWER DEFENSE", pygame.font.Font(None, 74), GOLD, WIDTH//2, HEIGHT//3, center=True)
+			pygame.draw.rect(screen, BLUE if (WIDTH//2-150 <= mx <= WIDTH//2+150 and HEIGHT//2-40 <= my <= HEIGHT//2+20) else DARK_GRAY, (WIDTH//2-150, HEIGHT//2-40, 300, 60), border_radius=10)
+			draw_text(screen, "STANDARD RUN",  large_font, WHITE, WIDTH//2, HEIGHT//2-10, center=True)
+			pygame.draw.rect(screen, PURPLE if (WIDTH//2-150 <= mx <= WIDTH//2+150 and HEIGHT//2+40 <= my <= HEIGHT//2+100) else DARK_GRAY, (WIDTH//2-150, HEIGHT//2+40, 300, 60), border_radius=10)
+			draw_text(screen, "ENDLESS MODE",  large_font, WHITE, WIDTH//2, HEIGHT//2+70, center=True)
 
-	# ===================== MENU =====================
-	if game.mode == "MENU":
-		draw_grid_and_entities(screen, game)
-		overlay = pygame.Surface((WIDTH, HEIGHT)); overlay.set_alpha(150); overlay.fill(BLACK); screen.blit(overlay, (0,0))
-		draw_text(screen, "Shuffle Tower Defense", pygame.font.SysFont("Arial", 60, bold=True), GOLD, WIDTH//2, HEIGHT//3, center=True)
-		pygame.draw.rect(screen, BLUE if (WIDTH//2-150 <= mx <= WIDTH//2+150 and HEIGHT//2-40 <= my <= HEIGHT//2+20) else DARK_GRAY, (WIDTH//2-150, HEIGHT//2-40, 300, 60), border_radius=10)
-		draw_text(screen, "STANDARD RUN",  large_font, WHITE, WIDTH//2, HEIGHT//2-10, center=True)
-		pygame.draw.rect(screen, PURPLE if (WIDTH//2-150 <= mx <= WIDTH//2+150 and HEIGHT//2+40 <= my <= HEIGHT//2+100) else DARK_GRAY, (WIDTH//2-150, HEIGHT//2+40, 300, 60), border_radius=10)
-		draw_text(screen, "ENDLESS MODE",  large_font, WHITE, WIDTH//2, HEIGHT//2+70, center=True)
+		# ===================== CLASS SELECT =====================
+		elif game.mode == "CLASS_SELECT":
+			draw_text(screen, "CHOOSE YOUR CLASS", pygame.font.Font(None, 60), GOLD, WIDTH//2, 45, center=True)
+			class_keys = list(CLASS_DEFS.keys())
+			card_w, card_h, gap = 220, 300, 12
+			total_w = len(class_keys) * card_w + (len(class_keys) - 1) * gap
+			start_x = WIDTH//2 - total_w//2
+			for i, ckey in enumerate(class_keys):
+				cdef = CLASS_DEFS[ckey]
+				bx = start_x + i * (card_w + gap)
+				by = HEIGHT//2 - card_h//2
+				is_hover = bx <= mx <= bx+card_w and by <= my <= by+card_h
+				pygame.draw.rect(screen, (20, 20, 30), (bx, by, card_w, card_h), border_radius=12)
+				pygame.draw.rect(screen, cdef["color"] if is_hover else DARK_GRAY, (bx, by, card_w, card_h), 3, border_radius=12)
+				draw_text(screen, cdef["name"], pygame.font.Font(None, 32), cdef["color"], bx+card_w//2, by+28, center=True)
+				desc_words = cdef["desc"].split()
+				dy = by + 62; line = ""
+				for w in desc_words:
+					if font.size(line + w)[0] > card_w - 20: draw_text(screen, line, font, WHITE, bx+10, dy); dy += 20; line = w + " "
+					else: line += w + " "
+				draw_text(screen, line, font, WHITE, bx+10, dy); dy += 28
+				detail_words = ("DECK: " + cdef["detail"]).split()
+				line = ""
+				for w in detail_words:
+					if font.size(line + w)[0] > card_w - 20: draw_text(screen, line, font, GRAY, bx+10, dy); dy += 17; line = w + " "
+					else: line += w + " "
+				draw_text(screen, line, font, GRAY, bx+10, dy)
+				draw_text(screen, "Click to Select", font, GOLD if is_hover else GRAY, bx+card_w//2, by+card_h-22, center=True)
 
-	# ===================== CLASS SELECT =====================
-	elif game.mode == "CLASS_SELECT":
-		draw_text(screen, "CHOOSE YOUR CLASS", pygame.font.SysFont("Arial", 48, bold=True), GOLD, WIDTH//2, 45, center=True)
-		class_keys = list(CLASS_DEFS.keys())
-		card_w, card_h, gap = 220, 300, 12
-		total_w = len(class_keys) * card_w + (len(class_keys) - 1) * gap
-		start_x = WIDTH//2 - total_w//2
-		for i, ckey in enumerate(class_keys):
-			cdef = CLASS_DEFS[ckey]
-			bx = start_x + i * (card_w + gap)
-			by = HEIGHT//2 - card_h//2
-			is_hover = bx <= mx <= bx+card_w and by <= my <= by+card_h
-			pygame.draw.rect(screen, (20, 20, 30), (bx, by, card_w, card_h), border_radius=12)
-			pygame.draw.rect(screen, cdef["color"] if is_hover else DARK_GRAY, (bx, by, card_w, card_h), 3, border_radius=12)
-			draw_text(screen, cdef["name"], pygame.font.SysFont("Arial", 24, bold=True), cdef["color"], bx+card_w//2, by+28, center=True)
-			desc_words = cdef["desc"].split()
-			dy = by + 62; line = ""
-			for w in desc_words:
-				if font.size(line + w)[0] > card_w - 20: draw_text(screen, line, font, WHITE, bx+10, dy); dy += 20; line = w + " "
-				else: line += w + " "
-			draw_text(screen, line, font, WHITE, bx+10, dy); dy += 28
-			detail_words = ("DECK: " + cdef["detail"]).split()
-			line = ""
-			for w in detail_words:
-				if font.size(line + w)[0] > card_w - 20: draw_text(screen, line, font, GRAY, bx+10, dy); dy += 17; line = w + " "
-				else: line += w + " "
-			draw_text(screen, line, font, GRAY, bx+10, dy)
-			draw_text(screen, "Click to Select", font, GOLD if is_hover else GRAY, bx+card_w//2, by+card_h-22, center=True)
+			# Back button
+			back_hover = 20 <= mx <= 130 and 20 <= my <= 55
+			pygame.draw.rect(screen, RED if back_hover else DARK_GRAY, (20, 20, 110, 35), border_radius=5)
+			draw_text(screen, "BACK", font, WHITE, 75, 37, center=True)
 
-		# Back button
-		back_hover = 20 <= mx <= 130 and 20 <= my <= 55
-		pygame.draw.rect(screen, RED if back_hover else DARK_GRAY, (20, 20, 110, 35), border_radius=5)
-		draw_text(screen, "BACK", font, WHITE, 75, 37, center=True)
+		# ===================== MAP =====================
+		elif game.mode == "MAP":
+			# --- Scrollable virtual canvas setup ---
+			scroll_area_h = HEIGHT - MAP_HUD_H - 50
+			max_scroll = max(0, MAP_CANVAS_H - scroll_area_h)
+			game.map_scroll = max(0, min(max_scroll, game.map_scroll))
 
-	# ===================== MAP =====================
-	elif game.mode == "MAP":
-		# --- Scrollable virtual canvas setup ---
-		scroll_area_h = HEIGHT - MAP_HUD_H - 50
-		max_scroll = max(0, MAP_CANVAS_H - scroll_area_h)
-		game.map_scroll = max(0, min(max_scroll, game.map_scroll))
+			# Background for map area
+			pygame.draw.rect(screen, (14, 14, 22), (0, MAP_HUD_H, WIDTH - MAP_SCROLLBAR_W, scroll_area_h))
 
-		# Background for map area
-		pygame.draw.rect(screen, (14, 14, 22), (0, MAP_HUD_H, WIDTH - MAP_SCROLLBAR_W, scroll_area_h))
+			# Virtual canvas
+			vsurf = pygame.Surface((WIDTH - MAP_SCROLLBAR_W, MAP_CANVAS_H))
+			vsurf.fill((14, 14, 22))
 
-		# Virtual canvas
-		vsurf = pygame.Surface((WIDTH - MAP_SCROLLBAR_W, MAP_CANVAS_H))
-		vsurf.fill((14, 14, 22))
+			label_font = pygame.font.Font(None, 18)
 
-		label_font = pygame.font.SysFont("Arial", 13, bold=True)
+			# Node style: bg, border, icon image key, icon color (unused with PNG), display name
+			NODE_STYLE = {
+				'TUTORIAL': ((20, 35, 70),  (80, 140, 255),  "icon_tutorial", (180, 210, 255), "Tutorial"),
+				'BATTLE':   ((20, 45, 20),  (70, 210, 70),   "icon_battle",   (160, 255, 160), "Battle"),
+				'ELITE':    ((65, 15, 15),  (220, 55, 55),   "icon_elite",    (255, 130, 130), "Elite"),
+				'SHOP':     ((55, 45, 5),   (255, 205, 0),   "icon_shop",     (255, 230, 90),  "Shop"),
+				'CAMPFIRE': ((50, 28, 5),   (220, 120, 35),  "icon_campfire", (255, 175, 70),  "Campfire"),
+				'BOSS':     ((55, 0, 55),   (210, 0, 210),   "icon_boss",     (255, 110, 255), "Boss"),
+			}
+			NODE_R = 34
 
-		# Node style: bg, border, icon image key, icon color (unused with PNG), display name
-		NODE_STYLE = {
-			'TUTORIAL': ((20, 35, 70),  (80, 140, 255),  "icon_tutorial", (180, 210, 255), "Tutorial"),
-			'BATTLE':   ((20, 45, 20),  (70, 210, 70),   "icon_battle",   (160, 255, 160), "Battle"),
-			'ELITE':    ((65, 15, 15),  (220, 55, 55),   "icon_elite",    (255, 130, 130), "Elite"),
-			'SHOP':     ((55, 45, 5),   (255, 205, 0),   "icon_shop",     (255, 230, 90),  "Shop"),
-			'CAMPFIRE': ((50, 28, 5),   (220, 120, 35),  "icon_campfire", (255, 175, 70),  "Campfire"),
-			'BOSS':     ((55, 0, 55),   (210, 0, 210),   "icon_boss",     (255, 110, 255), "Boss"),
-		}
-		NODE_R = 34
+			# --- Draw connections (straight line style) ---
+			for tier in game.map_tiers:
+				for node in tier:
+					for target in node.connections:
+						if node == game.current_node:
+							lcolor, lw = (255, 215, 0), 4
+						elif node in game.available_next_nodes:
+							lcolor, lw = (80, 210, 80), 3
+						else:
+							lcolor, lw = (45, 45, 65), 2
+						x1, y1 = node.x, node.y - NODE_R
+						x2, y2 = target.x, target.y + NODE_R
+						# Use a direct diagonal line so paths are easy to trace
+						pygame.draw.line(vsurf, lcolor, (x1, y1), (x2, y2), lw)
 
-		# --- Draw connections (straight line style) ---
-		for tier in game.map_tiers:
-			for node in tier:
-				for target in node.connections:
-					if node == game.current_node:
-						lcolor, lw = (255, 215, 0), 4
-					elif node in game.available_next_nodes:
-						lcolor, lw = (80, 210, 80), 3
-					else:
-						lcolor, lw = (45, 45, 65), 2
-					x1, y1 = node.x, node.y - NODE_R
-					x2, y2 = target.x, target.y + NODE_R
-					# Use a direct diagonal line so paths are easy to trace
-					pygame.draw.line(vsurf, lcolor, (x1, y1), (x2, y2), lw)
+			# --- Draw nodes ---
+			for tier in game.map_tiers:
+				for node in tier:
+					style = NODE_STYLE.get(node.type, NODE_STYLE['BATTLE'])
+					bg_col, border_col, icon, icon_col, display_name = style
 
-		# --- Draw nodes ---
-		for tier in game.map_tiers:
-			for node in tier:
-				style = NODE_STYLE.get(node.type, NODE_STYLE['BATTLE'])
-				bg_col, border_col, icon, icon_col, display_name = style
+					is_available = node in game.available_next_nodes
+					is_current   = node == game.current_node
 
-				is_available = node in game.available_next_nodes
-				is_current   = node == game.current_node
+					# Override colors for state
+					if is_current:
+						border_col = GOLD
+						bg_col     = (55, 50, 8)
+					elif is_available:
+						pygame.draw.circle(vsurf, (60, 240, 60), (node.x, node.y), NODE_R + 8, 2)
 
-				# Override colors for state
-				if is_current:
-					border_col = GOLD
-					bg_col     = (55, 50, 8)
-				elif is_available:
-					pygame.draw.circle(vsurf, (60, 240, 60), (node.x, node.y), NODE_R + 8, 2)
+					# Drop shadow
+					pygame.draw.circle(vsurf, (8, 8, 12), (node.x + 3, node.y + 3), NODE_R)
+					# Fill
+					pygame.draw.circle(vsurf, bg_col, (node.x, node.y), NODE_R)
+					# Border (thicker for available/current)
+					bw = 3 if (is_available or is_current) else 2
+					pygame.draw.circle(vsurf, border_col, (node.x, node.y), NODE_R, bw)
 
-				# Drop shadow
-				pygame.draw.circle(vsurf, (8, 8, 12), (node.x + 3, node.y + 3), NODE_R)
-				# Fill
-				pygame.draw.circle(vsurf, bg_col, (node.x, node.y), NODE_R)
-				# Border (thicker for available/current)
-				bw = 3 if (is_available or is_current) else 2
-				pygame.draw.circle(vsurf, border_col, (node.x, node.y), NODE_R, bw)
+					# PNG icon — centered in circle
+					if icon in game.images:
+						icon_img = pygame.transform.smoothscale(game.images[icon], (40, 40))
+						ir = icon_img.get_rect(center=(node.x, node.y))
+						vsurf.blit(icon_img, ir)
 
-				# PNG icon — centered in circle
-				if icon in game.images:
-					icon_img = pygame.transform.smoothscale(game.images[icon], (40, 40))
-					ir = icon_img.get_rect(center=(node.x, node.y))
-					vsurf.blit(icon_img, ir)
+					# Label below node
+					lbl_surf = label_font.render(display_name, True, border_col)
+					lr = lbl_surf.get_rect(centerx=node.x, top=node.y + NODE_R + 4)
+					vsurf.blit(lbl_surf, lr)
 
-				# Label below node
-				lbl_surf = label_font.render(display_name, True, border_col)
-				lr = lbl_surf.get_rect(centerx=node.x, top=node.y + NODE_R + 4)
-				vsurf.blit(lbl_surf, lr)
+			# Blit virtual canvas into map area
+			clip_rect = pygame.Rect(0, MAP_HUD_H, WIDTH - MAP_SCROLLBAR_W, scroll_area_h)
+			screen.set_clip(clip_rect)
+			screen.blit(vsurf, (0, MAP_HUD_H - game.map_scroll))
+			screen.set_clip(None)
 
-		# Blit virtual canvas into map area
-		clip_rect = pygame.Rect(0, MAP_HUD_H, WIDTH - MAP_SCROLLBAR_W, scroll_area_h)
-		screen.set_clip(clip_rect)
-		screen.blit(vsurf, (0, MAP_HUD_H - game.map_scroll))
-		screen.set_clip(None)
+			# --- Scrollbar ---
+			sb_x = WIDTH - MAP_SCROLLBAR_W
+			pygame.draw.rect(screen, (25, 25, 38), (sb_x, MAP_HUD_H, MAP_SCROLLBAR_W, scroll_area_h))
+			pygame.draw.line(screen, (50, 50, 70), (sb_x, MAP_HUD_H), (sb_x, MAP_HUD_H + scroll_area_h), 1)
+			if max_scroll > 0:
+				thumb_h = max(35, int(scroll_area_h * scroll_area_h / MAP_CANVAS_H))
+				thumb_y = MAP_HUD_H + int((scroll_area_h - thumb_h) * game.map_scroll / max_scroll)
+			else:
+				thumb_h, thumb_y = scroll_area_h, MAP_HUD_H
+			pygame.draw.rect(screen, (75, 75, 108), (sb_x + 2, thumb_y + 2, MAP_SCROLLBAR_W - 4, thumb_h - 4), border_radius=5)
+			pygame.draw.rect(screen, (130, 130, 170), (sb_x + 2, thumb_y + 2, MAP_SCROLLBAR_W - 4, thumb_h - 4), 1, border_radius=5)
 
-		# --- Scrollbar ---
-		sb_x = WIDTH - MAP_SCROLLBAR_W
-		pygame.draw.rect(screen, (25, 25, 38), (sb_x, MAP_HUD_H, MAP_SCROLLBAR_W, scroll_area_h))
-		pygame.draw.line(screen, (50, 50, 70), (sb_x, MAP_HUD_H), (sb_x, MAP_HUD_H + scroll_area_h), 1)
-		if max_scroll > 0:
-			thumb_h = max(35, int(scroll_area_h * scroll_area_h / MAP_CANVAS_H))
-			thumb_y = MAP_HUD_H + int((scroll_area_h - thumb_h) * game.map_scroll / max_scroll)
-		else:
-			thumb_h, thumb_y = scroll_area_h, MAP_HUD_H
-		pygame.draw.rect(screen, (75, 75, 108), (sb_x + 2, thumb_y + 2, MAP_SCROLLBAR_W - 4, thumb_h - 4), border_radius=5)
-		pygame.draw.rect(screen, (130, 130, 170), (sb_x + 2, thumb_y + 2, MAP_SCROLLBAR_W - 4, thumb_h - 4), 1, border_radius=5)
+			# --- HUD bar (fixed, not scrolled) ---
+			pygame.draw.rect(screen, (16, 16, 28), (0, 0, WIDTH, MAP_HUD_H))
+			pygame.draw.line(screen, (50, 50, 80), (0, MAP_HUD_H - 1), (WIDTH, MAP_HUD_H - 1), 1)
 
-		# --- HUD bar (fixed, not scrolled) ---
-		pygame.draw.rect(screen, (16, 16, 28), (0, 0, WIDTH, MAP_HUD_H))
-		pygame.draw.line(screen, (50, 50, 80), (0, MAP_HUD_H - 1), (WIDTH, MAP_HUD_H - 1), 1)
+			# Shared sizes
+			hud_y   = MAP_HUD_H // 2   # vertical center of HUD bar
+			pad     = 12                # left padding / gap between items
+			hud_font = pygame.font.Font(None, 23)
 
-		# Shared sizes
-		hud_y   = MAP_HUD_H // 2   # vertical center of HUD bar
-		pad     = 12                # left padding / gap between items
-		hud_font = pygame.font.SysFont("Arial", 17, bold=True)
+			# -- HP --
+			hp_ratio  = game.base_hp / max(1, game.base_max_hp)
+			hp_col    = GREEN if hp_ratio > 0.5 else (ORANGE if hp_ratio > 0.25 else RED)
+			if "icon_heart" in game.images:
+				heart_surf = pygame.transform.smoothscale(game.images["icon_heart"], (28, 28))
+			else:
+				heart_surf = hud_font.render("HP", True, hp_col)
+			hp_str     = f" {game.base_hp}/{game.base_max_hp}"
+			hp_surf    = hud_font.render(hp_str, True, hp_col)
+			cursor_x   = pad
+			screen.blit(heart_surf, heart_surf.get_rect(midleft=(cursor_x, hud_y)))
+			cursor_x  += heart_surf.get_width() + 2
+			screen.blit(hp_surf, hp_surf.get_rect(midleft=(cursor_x, hud_y)))
+			cursor_x  += hp_surf.get_width() + pad * 2
 
-		# -- HP --
-		hp_ratio  = game.base_hp / max(1, game.base_max_hp)
-		hp_col    = GREEN if hp_ratio > 0.5 else (ORANGE if hp_ratio > 0.25 else RED)
-		if "icon_heart" in game.images:
-			heart_surf = pygame.transform.smoothscale(game.images["icon_heart"], (28, 28))
-		else:
-			heart_surf = hud_font.render("HP", True, hp_col)
-		hp_str     = f" {game.base_hp}/{game.base_max_hp}"
-		hp_surf    = hud_font.render(hp_str, True, hp_col)
-		cursor_x   = pad
-		screen.blit(heart_surf, heart_surf.get_rect(midleft=(cursor_x, hud_y)))
-		cursor_x  += heart_surf.get_width() + 2
-		screen.blit(hp_surf, hp_surf.get_rect(midleft=(cursor_x, hud_y)))
-		cursor_x  += hp_surf.get_width() + pad * 2
-
-		# Divider
-		pygame.draw.line(screen, (60, 60, 90), (cursor_x, 8), (cursor_x, MAP_HUD_H - 8), 1)
-		cursor_x += pad
-
-		# -- Gold --
-		if "icon_coin" in game.images:
-			coin_surf = pygame.transform.smoothscale(game.images["icon_coin"], (28, 28))
-		else:
-			coin_surf = hud_font.render("G", True, GOLD)
-		gold_str   = f" {game.gold}"
-		if game.is_endless:
-			gold_str += f"   Loop {game.loop_count + 1}"
-		gold_surf  = hud_font.render(gold_str, True, GOLD)
-		screen.blit(coin_surf, coin_surf.get_rect(midleft=(cursor_x, hud_y)))
-		cursor_x  += coin_surf.get_width() + 2
-		screen.blit(gold_surf, gold_surf.get_rect(midleft=(cursor_x, hud_y)))
-		cursor_x  += gold_surf.get_width() + pad * 2
-
-		# Divider
-		if game.passives:
+			# Divider
 			pygame.draw.line(screen, (60, 60, 90), (cursor_x, 8), (cursor_x, MAP_HUD_H - 8), 1)
 			cursor_x += pad
 
-		# -- Passives (left-to-right from cursor_x) --
-		passive_cy = MAP_HUD_H // 2 - 14   # top of 32px badge to center vertically
-		after_passives_x = draw_passives(screen, game, mx, my, start_x=cursor_x, cy=passive_cy)
-		cursor_x = after_passives_x
+			# -- Gold --
+			if "icon_coin" in game.images:
+				coin_surf = pygame.transform.smoothscale(game.images["icon_coin"], (28, 28))
+			else:
+				coin_surf = hud_font.render("G", True, GOLD)
+			gold_str   = f" {game.gold}"
+			if game.is_endless:
+				gold_str += f"   Loop {game.loop_count + 1}"
+			gold_surf  = hud_font.render(gold_str, True, GOLD)
+			screen.blit(coin_surf, coin_surf.get_rect(midleft=(cursor_x, hud_y)))
+			cursor_x  += coin_surf.get_width() + 2
+			screen.blit(gold_surf, gold_surf.get_rect(midleft=(cursor_x, hud_y)))
+			cursor_x  += gold_surf.get_width() + pad * 2
 
-		# Divider before curses
-		if game.pending_curses:
+			# Divider
 			if game.passives:
-				cursor_x += pad
 				pygame.draw.line(screen, (60, 60, 90), (cursor_x, 8), (cursor_x, MAP_HUD_H - 8), 1)
 				cursor_x += pad
-			else:
-				cursor_x += pad
 
-		# -- Curses (hoverable badges, continuation of same row) --
-		map_curse_tooltip = None
-		for ci_idx, cid in enumerate(game.pending_curses):
-			cname, cdesc = CURSE_DEFINITIONS[cid]
-			bw = hud_font.size(cname)[0] + 18
-			bh = 26
-			bx = cursor_x + ci_idx * (bw + 6)
-			by = hud_y - bh // 2
-			ch = bx <= mx <= bx + bw and by <= my <= by + bh
-			pygame.draw.rect(screen, (70, 0, 70), (bx, by, bw, bh), border_radius=5)
-			pygame.draw.rect(screen, (255, 80, 255) if ch else CURSE_COLOR, (bx, by, bw, bh), 1, border_radius=5)
-			if "icon_warning" in game.images:
-				curse_icon = pygame.transform.smoothscale(game.images["icon_warning"], (16, 16))
-				screen.blit(curse_icon, curse_icon.get_rect(midleft=(bx + 5, hud_y)))
-				skull_surf = hud_font.render(f" {cname}", True, (255, 150, 255))
-				screen.blit(skull_surf, skull_surf.get_rect(midleft=(bx + 22, hud_y)))
-			else:
-				skull_surf = hud_font.render(f"* {cname}", True, (255, 150, 255))
-				screen.blit(skull_surf, skull_surf.get_rect(midleft=(bx + 8, hud_y)))
-			if ch:
-				map_curse_tooltip = (cname, cdesc, bx, MAP_HUD_H + 4)
+			# -- Passives (left-to-right from cursor_x) --
+			passive_cy = MAP_HUD_H // 2 - 14   # top of 32px badge to center vertically
+			after_passives_x = draw_passives(screen, game, mx, my, start_x=cursor_x, cy=passive_cy)
+			cursor_x = after_passives_x
 
-		if map_curse_tooltip:
-			cname, cdesc, ttx, tty = map_curse_tooltip
-			tw1 = hud_font.size(cname)[0]
-			tw2 = hud_font.size(cdesc)[0]
-			box_w = min(max(tw1, tw2) + 24, 400)
-			ttx = min(ttx, WIDTH - box_w - 6)
-			pygame.draw.rect(screen, (50, 0, 50), (ttx, tty, box_w, 62), border_radius=6)
-			pygame.draw.rect(screen, CURSE_COLOR,  (ttx, tty, box_w, 62), 2, border_radius=6)
-			screen.blit(hud_font.render(cname, True, (255, 150, 255)), (ttx + 10, tty + 8))
-			screen.blit(hud_font.render(cdesc, True, WHITE),           (ttx + 10, tty + 28))
-			screen.blit(hud_font.render("(applies to your next battle)", True, GRAY), (ttx + 10, tty + 46))
+			# Divider before curses
+			if game.pending_curses:
+				if game.passives:
+					cursor_x += pad
+					pygame.draw.line(screen, (60, 60, 90), (cursor_x, 8), (cursor_x, MAP_HUD_H - 8), 1)
+					cursor_x += pad
+				else:
+					cursor_x += pad
 
-		# Deck button (bottom-left, outside scroll area)
-		deck_btn_hover = 20 <= mx <= 175 and HEIGHT - 45 <= my <= HEIGHT - 15
-		pygame.draw.rect(screen, BLUE if deck_btn_hover else (35, 35, 55), (20, HEIGHT - 45, 155, 30), border_radius=5)
-		pygame.draw.rect(screen, (80, 80, 120), (20, HEIGHT - 45, 155, 30), 1, border_radius=5)
-		deck_str = f"View Deck  ({len(game.master_deck)})"
-		screen.blit(hud_font.render(deck_str, True, WHITE),
-					hud_font.render(deck_str, True, WHITE).get_rect(center=(97, HEIGHT - 30)))
-	# ===================== BATTLE =====================
-	elif game.mode == "BATTLE":
-		draw_grid_and_entities(screen, game)
-		draw_text(screen, f"Base HP: {game.base_hp}/{game.base_max_hp}", font, GREEN, 20, 20)
-		draw_text(screen, f"Gold: {game.gold}", font, GOLD, 20, 40)
-		draw_text(screen, f"Wave: {game.wave}/{game.max_waves}", font, WHITE, 20, 60)
-		draw_active_curses(screen, game, mx, my)
+# -- Curses (hoverable badges, continuation of same row) --
+			map_curse_tooltip = None
+			for ci_idx, cid in enumerate(game.pending_curses):
+				cname, cdesc = CURSE_DEFINITIONS[cid]
+				bw = hud_font.size(cname)[0] + 18
+				bh = 26
+				bx = cursor_x + ci_idx * (bw + 6)
+				by = hud_y - bh // 2
+				ch = bx <= mx <= bx + bw and by <= my <= by + bh
+				pygame.draw.rect(screen, (70, 0, 70), (bx, by, bw, bh), border_radius=6)
+				pygame.draw.rect(screen, (255, 80, 255) if ch else CURSE_COLOR, (bx, by, bw, bh), 1, border_radius=6)
+				if "icon_warning" in game.images:
+					curse_icon = pygame.transform.smoothscale(game.images["icon_warning"], (16, 16))
+					screen.blit(curse_icon, curse_icon.get_rect(midleft=(bx + 5, hud_y)))
+					skull_surf = hud_font.render(f" {cname}", True, (255, 150, 255))
+					screen.blit(skull_surf, skull_surf.get_rect(midleft=(bx + 22, hud_y)))
+				else:
+					skull_surf = hud_font.render(f"* {cname}", True, (255, 150, 255))
+					screen.blit(skull_surf, skull_surf.get_rect(midleft=(bx + 8, hud_y)))
+				if ch:
+					map_curse_tooltip = (cname, cdesc, bx, MAP_HUD_H + 4)
 
-		draw_text(screen, f"Energy: {game.energy}/{game.max_energy}", large_font, BLUE, 20, HEIGHT-130)
-		if "OVERCHARGE" in game.passives and not game.overcharge_used:
-			draw_text(screen, "OVERCHARGE READY", font, GOLD, 20, HEIGHT-108)
-		draw_pile_hover = 20 <= mx <= 160 and HEIGHT-80 <= my <= HEIGHT-60
-		pygame.draw.rect(screen, DARK_GRAY if not draw_pile_hover else (70,70,90), (18, HEIGHT-83, 145, 25), border_radius=4)
-		draw_text(screen, f"Draw: {len(game.draw_pile)}  Discard: {len(game.discard_pile)}", font, WHITE, 20, HEIGHT-80)
-		draw_text(screen, f"Exhaust: {len(game.exhaust_pile)}", font, ORANGE, WIDTH-150, HEIGHT-90)
-		draw_passives(screen, game, mx, my)
+			if map_curse_tooltip:
+				cname, cdesc, ttx, tty = map_curse_tooltip
+				tw1 = hud_font.size(cname)[0]
+				tw2 = hud_font.size(cdesc)[0]
+				box_w = min(max(tw1, tw2) + 24, 400)
+				ttx = min(ttx, WIDTH - box_w - 6)
+				pygame.draw.rect(screen, (50, 0, 50), (ttx, tty, box_w, 62), border_radius=6)
+				pygame.draw.rect(screen, CURSE_COLOR,  (ttx, tty, box_w, 62), 2, border_radius=6)
+				screen.blit(hud_font.render(cname, True, (255, 150, 255)), (ttx + 10, tty + 8))
+				screen.blit(hud_font.render(cdesc, True, WHITE),           (ttx + 10, tty + 28))
+				screen.blit(hud_font.render("(applies to your next battle)", True, GRAY), (ttx + 10, tty + 46))
 
-		if game.tutorial_active:
-			pygame.draw.rect(screen, DARK_GRAY, (WIDTH//2-380, 20, 760, 60), border_radius=10)
-			pygame.draw.rect(screen, GOLD,      (WIDTH//2-380, 20, 760, 60), 2, border_radius=10)
-			draw_text(screen, game.tutorial_messages[game.tutorial_index], font, WHITE, WIDTH//2, 50, center=True)
+			# Deck button (bottom-left, outside scroll area)
+			deck_btn_hover = 20 <= mx <= 175 and HEIGHT - 45 <= my <= HEIGHT - 15
+			pygame.draw.rect(screen, BLUE if deck_btn_hover else (35, 35, 55), (20, HEIGHT - 45, 155, 30), border_radius=5)
+			pygame.draw.rect(screen, (80, 80, 120), (20, HEIGHT - 45, 155, 30), 1, border_radius=5)
+			deck_str = f"View Deck  ({len(game.master_deck)})"
+			screen.blit(hud_font.render(deck_str, True, WHITE),
+						hud_font.render(deck_str, True, WHITE).get_rect(center=(97, HEIGHT - 30)))
+		# ===================== BATTLE =====================
+		elif game.mode == "BATTLE":
+			draw_grid_and_entities(screen, game)
+			draw_text(screen, f"Base HP: {game.base_hp}/{game.base_max_hp}", font, GREEN, 20, 20)
+			draw_text(screen, f"Gold: {game.gold}", font, GOLD, 20, 40)
+			draw_text(screen, f"Wave: {game.wave}/{game.max_waves}", font, WHITE, 20, 60)
+			draw_active_curses(screen, game, mx, my)
 
-		if game.battle_phase == "PLANNING":
-			pygame.draw.rect(screen, GREEN, (WIDTH-150, 20, 130, 40), border_radius=5)
-			draw_text(screen, "Start Wave", font, BLACK, WIDTH-140, 30)
+			draw_text(screen, f"Energy: {game.energy}/{game.max_energy}", large_font, BLUE, 20, HEIGHT-130)
+			if "OVERCHARGE" in game.passives and not game.overcharge_used:
+				draw_text(screen, "OVERCHARGE READY", font, GOLD, 20, HEIGHT-108)
+			draw_pile_hover = 20 <= mx <= 160 and HEIGHT-80 <= my <= HEIGHT-60
+			pygame.draw.rect(screen, DARK_GRAY if not draw_pile_hover else (70,70,90), (18, HEIGHT-83, 145, 25), border_radius=4)
+			draw_text(screen, f"Draw: {len(game.draw_pile)}  Discard: {len(game.discard_pile)}", font, WHITE, 20, HEIGHT-80)
+			draw_text(screen, f"Exhaust: {len(game.exhaust_pile)}", font, ORANGE, WIDTH-150, HEIGHT-90)
+			draw_passives(screen, game, mx, my)
 
-			preview_counts = {}
-			for e in game.enemies_to_spawn: preview_counts[e.type] = preview_counts.get(e.type, 0) + 1
-			draw_text(screen, "INCOMING WAVE:", font, RED, WIDTH-140, 80)
-			y_off = 100
-			for etype, ecount in preview_counts.items():
-				draw_text(screen, f"{ecount}x {etype}", font, WHITE, WIDTH-140, y_off); y_off += 20
+			if game.tutorial_active:
+				pygame.draw.rect(screen, DARK_GRAY, (WIDTH//2-380, 20, 760, 60), border_radius=10)
+				pygame.draw.rect(screen, GOLD,      (WIDTH//2-380, 20, 760, 60), 2, border_radius=10)
+				draw_text(screen, game.tutorial_messages[game.tutorial_index], font, WHITE, WIDTH//2, 50, center=True)
 
-			hand_x = WIDTH//2 - (len(game.hand)*130)//2
-			for i, card in enumerate(game.hand):
-				if card != game.dragging_card:
-					draw_card(screen, card, hand_x + i*130, HEIGHT-180,
-							  hand_x+i*130 <= mx <= hand_x+i*130+120 and HEIGHT-180 <= my <= HEIGHT-20)
-			if game.dragging_card: draw_card(screen, game.dragging_card, mx-60, my-80, True)
+			if game.battle_phase == "PLANNING":
+				pygame.draw.rect(screen, GREEN, (WIDTH-150, 20, 130, 40), border_radius=5)
+				draw_text(screen, "Start Wave", font, BLACK, WIDTH-140, 30)
 
-			if game.confirm_wave:
-				overlay = pygame.Surface((WIDTH, HEIGHT)); overlay.set_alpha(160); overlay.fill(BLACK); screen.blit(overlay, (0,0))
-				dlg_x, dlg_y, dlg_w, dlg_h = WIDTH//2-220, HEIGHT//2-80, 440, 160
-				pygame.draw.rect(screen, DARK_GRAY, (dlg_x, dlg_y, dlg_w, dlg_h), border_radius=10)
-				pygame.draw.rect(screen, RED, (dlg_x, dlg_y, dlg_w, dlg_h), 3, border_radius=10)
-				draw_text(screen, "No towers placed!", large_font, RED, WIDTH//2, HEIGHT//2-50, center=True)
-				draw_text(screen, "Are you sure you want to start the wave?", font, WHITE, WIDTH//2, HEIGHT//2-15, center=True)
-				sh = WIDTH//2-120 <= mx <= WIDTH//2-10 and HEIGHT//2+20 <= my <= HEIGHT//2+60
-				bh = WIDTH//2+10  <= mx <= WIDTH//2+120 and HEIGHT//2+20 <= my <= HEIGHT//2+60
-				pygame.draw.rect(screen, RED   if sh else (100,30,30),  (WIDTH//2-120, HEIGHT//2+20, 110, 40), border_radius=6)
-				pygame.draw.rect(screen, GREEN if bh else (30,100,30),  (WIDTH//2+10,  HEIGHT//2+20, 110, 40), border_radius=6)
-				draw_text(screen, "Start anyway", font, WHITE, WIDTH//2-65, HEIGHT//2+40, center=True)
-				draw_text(screen, "Go back",      font, WHITE, WIDTH//2+65, HEIGHT//2+40, center=True)
+				preview_counts = {}
+				for e in game.enemies_to_spawn: preview_counts[e.type] = preview_counts.get(e.type, 0) + 1
+				draw_text(screen, "INCOMING WAVE:", font, RED, WIDTH-140, 80)
+				y_off = 100
+				for etype, ecount in preview_counts.items():
+					draw_text(screen, f"{ecount}x {etype}", font, WHITE, WIDTH-140, y_off); y_off += 20
 
-	# ===================== CURSE REWARD =====================
-	elif game.mode == "CURSE_REWARD":
-		draw_text(screen, "BATTLE COMPLETE! CHOOSE YOUR REWARD", large_font, GOLD, WIDTH//2, 50, center=True)
-		draw_text(screen, "More cards = more power, but also more curses on your next battle!", font, GRAY, WIDTH//2, 90, center=True)
+				hand_x = WIDTH//2 - (len(game.hand)*130)//2
+				for i, card in enumerate(game.hand):
+					if card != game.dragging_card:
+						draw_card(screen, card, hand_x + i*130, HEIGHT-180,
+								  hand_x+i*130 <= mx <= hand_x+i*130+120 and HEIGHT-180 <= my <= HEIGHT-20)
+				if game.dragging_card: draw_card(screen, game.dragging_card, mx-60, my-80, True)
 
-		options = [
-			(1, 0, HEIGHT//2 - 200, "1 Card  |  No Curse"),
-			(2, 1, HEIGHT//2 - 60,  "2 Cards  |  1 Curse"),
-			(3, 2, HEIGHT//2 + 80,  "3 Cards  |  2 Curses"),
-		]
-		cards_all = game.curse_reward_cards
-		curse_tooltip = None
-		card_tooltip = None
-		for num_cards, num_curses, oy, label in options:
-			is_hover = WIDTH//2-280 <= mx <= WIDTH//2+280 and oy <= my <= oy+110
-			box_color = (40, 40, 55) if not is_hover else (60, 60, 80)
-			border_color = GOLD if is_hover else (CURSE_COLOR if num_curses > 0 else GREEN)
-			pygame.draw.rect(screen, box_color, (WIDTH//2-280, oy, 560, 110), border_radius=10)
-			pygame.draw.rect(screen, border_color, (WIDTH//2-280, oy, 560, 110), 3, border_radius=10)
-			label_color = GREEN if num_curses == 0 else (ORANGE if num_curses == 1 else RED)
-			draw_text(screen, label, large_font, label_color, WIDTH//2-270, oy+10)
-			
-			# Show card name badges (hoverable)
-			shown_cards = cards_all[:num_cards]
-			
-			# Start drawing items dynamically from the left edge
-			current_x = WIDTH // 2 - 260
-			for ci, card in enumerate(shown_cards):
-				cbw = font.size(card.name)[0] + 16
-				cbx = current_x
-				cby = oy + 45
+				if game.confirm_wave:
+					overlay = pygame.Surface((WIDTH, HEIGHT)); overlay.set_alpha(160); overlay.fill(BLACK); screen.blit(overlay, (0,0))
+					dlg_x, dlg_y, dlg_w, dlg_h = WIDTH//2-220, HEIGHT//2-80, 440, 160
+					pygame.draw.rect(screen, DARK_GRAY, (dlg_x, dlg_y, dlg_w, dlg_h), border_radius=10)
+					pygame.draw.rect(screen, RED, (dlg_x, dlg_y, dlg_w, dlg_h), 3, border_radius=10)
+					draw_text(screen, "No towers placed!", large_font, RED, WIDTH//2, HEIGHT//2-50, center=True)
+					draw_text(screen, "Are you sure you want to start the wave?", font, WHITE, WIDTH//2, HEIGHT//2-15, center=True)
+					sh = WIDTH//2-120 <= mx <= WIDTH//2-10 and HEIGHT//2+20 <= my <= HEIGHT//2+60
+					bh = WIDTH//2+10  <= mx <= WIDTH//2+120 and HEIGHT//2+20 <= my <= HEIGHT//2+60
+					pygame.draw.rect(screen, RED   if sh else (100,30,30),  (WIDTH//2-120, HEIGHT//2+20, 110, 40), border_radius=6)
+					pygame.draw.rect(screen, GREEN if bh else (30,100,30),  (WIDTH//2+10,  HEIGHT//2+20, 110, 40), border_radius=6)
+					draw_text(screen, "Start anyway", font, WHITE, WIDTH//2-65, HEIGHT//2+40, center=True)
+					draw_text(screen, "Go back",      font, WHITE, WIDTH//2+65, HEIGHT//2+40, center=True)
+
+		# ===================== CURSE REWARD =====================
+		elif game.mode == "CURSE_REWARD":
+			draw_text(screen, "BATTLE COMPLETE! CHOOSE YOUR REWARD", large_font, GOLD, WIDTH//2, 50, center=True)
+			draw_text(screen, "More cards = more power, but also more curses on your next battle!", font, GRAY, WIDTH//2, 90, center=True)
+
+			options = [
+				(1, 0, HEIGHT//2 - 200, "1 Card  |  No Curse"),
+				(2, 1, HEIGHT//2 - 60,  "2 Cards  |  1 Curse"),
+				(3, 2, HEIGHT//2 + 80,  "3 Cards  |  2 Curses"),
+			]
+			cards_all = game.curse_reward_cards
+			curse_tooltip = None
+			card_tooltip = None
+			for num_cards, num_curses, oy, label in options:
+				is_hover = WIDTH//2-280 <= mx <= WIDTH//2+280 and oy <= my <= oy+110
+				box_color = (40, 40, 55) if not is_hover else (60, 60, 80)
+				border_color = GOLD if is_hover else (CURSE_COLOR if num_curses > 0 else GREEN)
+				pygame.draw.rect(screen, box_color, (WIDTH//2-280, oy, 560, 110), border_radius=10)
+				pygame.draw.rect(screen, border_color, (WIDTH//2-280, oy, 560, 110), 3, border_radius=10)
+				label_color = GREEN if num_curses == 0 else (ORANGE if num_curses == 1 else RED)
+				draw_text(screen, label, large_font, label_color, WIDTH//2-270, oy+10)
 				
-				card_hover = cbx <= mx <= cbx + cbw and cby <= my <= cby + 22
-				badge_color = (50, 80, 50) if not card.upgraded else (50, 50, 80)
-				border_c = GREEN if card.upgraded else (180, 180, 180)
-				pygame.draw.rect(screen, badge_color, (cbx, cby, cbw, 22), border_radius=4)
-				pygame.draw.rect(screen, border_c, (cbx, cby, cbw, 22), 2, border_radius=4)
-				draw_text(screen, card.name, font, GOLD if card.upgraded else WHITE, cbx + 8, cby + 4)
-				if card_hover:
-					card_tooltip = (card, cbx, oy)
+				# Show card name badges (hoverable)
+				shown_cards = cards_all[:num_cards]
 				
-				# Advance the X position for the next card badge
-				current_x += cbw + 10 
-
-			# Show curse badges (hoverable)
-			if num_curses > 0:
-				current_x = WIDTH // 2 - 260 # Reset X to start on the next line down
-				for j in range(num_curses):
-					cid = game.curse_reward_preview_curses[j]
-					cname, cdesc = CURSE_DEFINITIONS[cid]
-					badge_w = font.size(cname)[0] + 28
-					badge_x = current_x
-					badge_y = oy + 75
+				# Define our boundaries
+				box_left = WIDTH // 2 - 280
+				box_right = WIDTH // 2 + 280
+				
+				# Start drawing items dynamically from the left edge
+				current_x = box_left + 20
+				current_y = oy + 45
+				
+				for ci, card in enumerate(shown_cards):
+					cbw = font.size(card.name)[0] + 16
 					
-					ch = badge_x <= mx <= badge_x + badge_w and badge_y <= my <= badge_y + 24
-					pygame.draw.rect(screen, (80, 0, 80), (badge_x, badge_y, badge_w, 24), border_radius=5)
-					pygame.draw.rect(screen, (255, 80, 255) if ch else CURSE_COLOR, (badge_x, badge_y, badge_w, 24), 2, border_radius=5)
-					if "icon_warning" in game.images:
-						warn_icon = pygame.transform.smoothscale(game.images["icon_warning"], (12, 12))
-						screen.blit(warn_icon, (badge_x + 6, badge_y + 6))
-						draw_text(screen, f"  {cname}", font, (255, 150, 255), badge_x + 20, badge_y + 4)
-					else:
-						draw_text(screen, f"! {cname}", font, (255, 150, 255), badge_x + 6, badge_y + 4)
-					if ch:
-						curse_tooltip = (cname, cdesc, badge_x, badge_y + 30)
+					# Wrap to the next line if this card exceeds the right edge of the box
+					if current_x + cbw > box_right - 20:
+						current_x = box_left + 20
+						current_y += 30 # Drop down to the next row
 						
-					# Advance the X position for the next curse badge
-					current_x += badge_w + 10
-		# Draw curse tooltip on top
-		if curse_tooltip:
-			cname, cdesc, ttx, tty = curse_tooltip
-			box_w = max(font.size(cname)[0], font.size(cdesc)[0]) + 20
-			box_w = min(box_w, 360)
-			ttx = min(ttx, WIDTH - box_w - 5)
-			pygame.draw.rect(screen, (60, 0, 60), (ttx, tty, box_w, 58), border_radius=6)
-			pygame.draw.rect(screen, CURSE_COLOR, (ttx, tty, box_w, 58), 2, border_radius=6)
-			draw_text(screen, cname, font, (255, 150, 255), ttx + 10, tty + 6)
-			draw_text(screen, cdesc, font, WHITE, ttx + 10, tty + 28)
-			draw_text(screen, "(applies to your next battle)", font, GRAY, ttx + 10, tty + 42)
-		# Draw card tooltip (mini card preview) on top
-		if card_tooltip:
-			card, cbx, oy = card_tooltip
-			px = min(cbx, WIDTH - 130)
-			py = oy - 175 if oy > HEIGHT // 2 else oy + 120
-			draw_card(screen, card, px, py, True)
-		# Skip button
-		skip_hov = WIDTH//2-75 <= mx <= WIDTH//2+75 and HEIGHT-55 <= my <= HEIGHT-20
-		pygame.draw.rect(screen, GRAY if skip_hov else DARK_GRAY, (WIDTH//2-75, HEIGHT-55, 150, 35), border_radius=6)
-		draw_text(screen, "SKIP", font, WHITE, WIDTH//2, HEIGHT-37, center=True)
+					cbx = current_x
+					cby = current_y
+					
+					card_hover = cbx <= mx <= cbx + cbw and cby <= my <= cby + 22
+					badge_color = (50, 80, 50) if not card.upgraded else (50, 50, 80)
+					border_c = GREEN if card.upgraded else (180, 180, 180)
+					pygame.draw.rect(screen, badge_color, (cbx, cby, cbw, 22), border_radius=4)
+					pygame.draw.rect(screen, border_c, (cbx, cby, cbw, 22), 2, border_radius=4)
+					draw_text(screen, card.name, font, GOLD if card.upgraded else WHITE, cbx + 8, cby + 4)
+					if card_hover:
+						card_tooltip = (card, cbx, oy)
+					
+					# Advance the X position for the next badge
+					current_x += cbw + 10 
 
-	# ===================== ELITE REWARD =====================
-	elif game.mode == "ELITE_REWARD":
-		is_boss_reward = game.current_node and game.current_node.type == 'BOSS'
-		title = "BOSS DEFEATED!" if is_boss_reward else "ELITE DEFEATED!"
-		draw_text(screen, title, large_font, GOLD, WIDTH//2, 25, center=True)
+				# Show curse badges (hoverable)
+				if num_curses > 0:
+					current_x += 10 # Add a slightly larger gap before starting curses
+					
+					for j in range(num_curses):
+						cid = game.curse_reward_preview_curses[j]
+						cname, cdesc = CURSE_DEFINITIONS[cid]
+						badge_w = font.size(cname)[0] + 28
+						
+						# Wrap to the next line if this curse exceeds the right edge
+						if current_x + badge_w > box_right - 20:
+							current_x = box_left + 20
+							current_y += 30 # Drop down to the next row
+							
+						badge_x = current_x
+						badge_y = current_y
+						
+						ch = badge_x <= mx <= badge_x + badge_w and badge_y <= my <= badge_y + 24
+						pygame.draw.rect(screen, (80, 0, 80), (badge_x, badge_y, badge_w, 24), border_radius=6)
+						pygame.draw.rect(screen, (255, 80, 255) if ch else CURSE_COLOR, (badge_x, badge_y, badge_w, 24), 2, border_radius=6)
+						if "icon_warning" in game.images:
+							warn_icon = pygame.transform.smoothscale(game.images["icon_warning"], (16, 16))
+							screen.blit(warn_icon, (badge_x + 6, badge_y + 4))
+							draw_text(screen, f"  {cname}", font, (255, 150, 255), badge_x + 20, badge_y + 4)
+						else:
+							draw_text(screen, f"! {cname}", font, (255, 150, 255), badge_x + 6, badge_y + 4)
+						if ch:
+							curse_tooltip = (cname, cdesc, badge_x, badge_y + 30)
+							
+						# Advance the X position for the next curse badge
+						current_x += badge_w + 10
 
-		card_y = 90
-		# --- LEFT SIDE: 3 upgraded cards ---
-		draw_text(screen, "CHOOSE 1 UPGRADED CARD:", font, GOLD, 220, 70, center=True)
-		if not game.reward_card_picked:
-			card_xs = [20, 150, 280]
-			for i, card in enumerate(game.reward_choices):
-				cx = card_xs[i]
-				is_hov = cx <= mx <= cx+120 and card_y <= my <= card_y+160
-				draw_card(screen, card, cx, card_y, is_hov)
-		else:
-			pygame.draw.rect(screen, (20, 80, 20), (20, 85, 400, 220), border_radius=10)
-			pygame.draw.rect(screen, GREEN, (20, 85, 400, 220), 2, border_radius=10)
-			if "icon_check" in game.images:
-				chk = pygame.transform.smoothscale(game.images["icon_check"], (30, 30))
-				screen.blit(chk, chk.get_rect(center=(220 - 30, 190)))
-			draw_text(screen, " DONE", large_font, GREEN, 220, 190, center=True)
+			# Draw curse tooltip on top
+			if curse_tooltip:
+				cname, cdesc, ttx, tty = curse_tooltip
+				box_w = max(font.size(cname)[0], font.size(cdesc)[0]) + 20
+				box_w = min(box_w, 360)
+				ttx = min(ttx, WIDTH - box_w - 5)
+				pygame.draw.rect(screen, (60, 0, 60), (ttx, tty, box_w, 58), border_radius=6)
+				pygame.draw.rect(screen, CURSE_COLOR, (ttx, tty, box_w, 58), 2, border_radius=6)
+				draw_text(screen, cname, font, (255, 150, 255), ttx + 10, tty + 6)
+				draw_text(screen, cdesc, font, WHITE, ttx + 10, tty + 28)
+				draw_text(screen, "(applies to your next battle)", font, GRAY, ttx + 10, tty + 42)
 
-		# Divider
-		pygame.draw.line(screen, DARK_GRAY, (WIDTH//2, 60), (WIDTH//2, HEIGHT-80), 2)
+			# Draw card tooltip (mini card preview) on top
+			if card_tooltip:
+				card, cbx, oy = card_tooltip
+				px = min(cbx, WIDTH - 130)
+				py = oy - 175 if oy > HEIGHT // 2 else oy + 120
+				draw_card(screen, card, px, py, True)
 
-		# --- RIGHT SIDE: passives or bonus cards ---
-		passive_x = WIDTH//2 + 20
-		passive_w = WIDTH//2 - 40
-		if game.no_passives_available:
-			draw_text(screen, "ALL PASSIVES OWNED — BONUS CARD:", font, GOLD, passive_x + passive_w//2, 70, center=True)
-		else:
-			draw_text(screen, "CHOOSE 1 PASSIVE:", font, GOLD, passive_x + passive_w//2, 70, center=True)
-		if not game.reward_passive_picked:
-			if game.no_passives_available:
-				bonus_xs = [passive_x, passive_x + 145, passive_x + 290]
-				for i, card in enumerate(game.reward_choices_bonus):
-					cx = bonus_xs[i]
+			# Skip button
+			skip_hov = WIDTH//2-75 <= mx <= WIDTH//2+75 and HEIGHT-55 <= my <= HEIGHT-20
+			pygame.draw.rect(screen, GRAY if skip_hov else DARK_GRAY, (WIDTH//2-75, HEIGHT-55, 150, 35), border_radius=6)
+			draw_text(screen, "SKIP", font, WHITE, WIDTH//2, HEIGHT-37, center=True)
+
+		# ===================== ELITE REWARD =====================
+		elif game.mode == "ELITE_REWARD":
+			is_boss_reward = game.current_node and game.current_node.type == 'BOSS'
+			title = "BOSS DEFEATED!" if is_boss_reward else "ELITE DEFEATED!"
+			draw_text(screen, title, large_font, GOLD, WIDTH//2, 25, center=True)
+
+			card_y = 90
+			# --- LEFT SIDE: 3 upgraded cards ---
+			draw_text(screen, "CHOOSE 1 UPGRADED CARD:", font, GOLD, 220, 70, center=True)
+			if not game.reward_card_picked:
+				card_xs = [20, 150, 280]
+				for i, card in enumerate(game.reward_choices):
+					cx = card_xs[i]
 					is_hov = cx <= mx <= cx+120 and card_y <= my <= card_y+160
 					draw_card(screen, card, cx, card_y, is_hov)
 			else:
-				for i, passive in enumerate(game.elite_passive_choices):
-					py = 90 + i * 90
-					is_hov = passive_x <= mx <= passive_x + passive_w and py <= my <= py + 75
-					draw_item_box(screen, passive.name, passive.description, 0, passive_x, py, passive_w, 75, is_hov, show_cost=False)
-		else:
-			pygame.draw.rect(screen, (20, 80, 20), (passive_x, 85, passive_w, 220), border_radius=10)
-			pygame.draw.rect(screen, GREEN, (passive_x, 85, passive_w, 220), 2, border_radius=10)
-			if "icon_check" in game.images:
-				chk = pygame.transform.smoothscale(game.images["icon_check"], (30, 30))
-				screen.blit(chk, chk.get_rect(center=(passive_x + passive_w//2 - 30, 190)))
-			draw_text(screen, " DONE", large_font, GREEN, passive_x + passive_w//2, 190, center=True)
+				pygame.draw.rect(screen, (20, 80, 20), (20, 85, 400, 220), border_radius=10)
+				pygame.draw.rect(screen, GREEN, (20, 85, 400, 220), 2, border_radius=10)
+				if "icon_check" in game.images:
+					chk = pygame.transform.smoothscale(game.images["icon_check"], (30, 30))
+					screen.blit(chk, chk.get_rect(center=(220 - 30, 190)))
+				draw_text(screen, " DONE", large_font, GREEN, 220, 190, center=True)
 
-		# --- Bottom buttons: CONTINUE (when both picked) + SKIP ---
-		both_picked = game.reward_card_picked and game.reward_passive_picked
-		cont_hover = WIDTH//2-220 <= mx <= WIDTH//2-20 and HEIGHT-60 <= my <= HEIGHT-20
-		cont_color = (GREEN if cont_hover else (50, 180, 50)) if both_picked else DARK_GRAY
-		pygame.draw.rect(screen, cont_color, (WIDTH//2-220, HEIGHT-60, 200, 40), border_radius=5)
-		draw_text(screen, "CONTINUE" if both_picked else "Pick first", font, WHITE if both_picked else GRAY, WIDTH//2-120, HEIGHT-40, center=True)
-		skip_both_hov = WIDTH//2+20 <= mx <= WIDTH//2+220 and HEIGHT-60 <= my <= HEIGHT-20
-		pygame.draw.rect(screen, GRAY if skip_both_hov else DARK_GRAY, (WIDTH//2+20, HEIGHT-60, 200, 40), border_radius=5)
-		draw_text(screen, "SKIP", font, WHITE, WIDTH//2+120, HEIGHT-40, center=True)
+			# Divider
+			pygame.draw.line(screen, DARK_GRAY, (WIDTH//2, 60), (WIDTH//2, HEIGHT-80), 2)
 
-	# ===================== SHOP =====================
-	elif game.mode == "SHOP":
-		draw_text(screen, f"SHOP - Gold: {game.gold}", large_font, GOLD, WIDTH//2, 55, center=True)
-		pygame.draw.circle(screen, (210,180,140), (80, 200), 28)
-		pygame.draw.rect(screen, (120,60,20), (52,228,56,70), border_radius=6)
-		pygame.draw.rect(screen, (80,40,10), (44,195,72,18), border_radius=4)
-		pygame.draw.rect(screen, (80,40,10), (54,160,52,40), border_radius=4)
-		draw_text(screen, "~", font, (210,180,140), 80, 248, center=True)
-
-		if game.shopkeeper_index < len(game.shopkeeper_intro):
-			line = game.shopkeeper_intro[game.shopkeeper_index]
-			show_prompt = game.shopkeeper_index < len(game.shopkeeper_intro) - 1
-		else:
-			line = game.shopkeeper_tip; show_prompt = False
-		bubble_w = min(max(font.size(line)[0]+24, 200), WIDTH-140)
-		bubble_x, bubble_y = 118, 160
-		pygame.draw.rect(screen, WHITE, (bubble_x, bubble_y, bubble_w, 54), border_radius=8)
-		pygame.draw.rect(screen, DARK_GRAY, (bubble_x, bubble_y, bubble_w, 54), 2, border_radius=8)
-		pygame.draw.polygon(screen, WHITE, [(bubble_x+10, bubble_y+42),(bubble_x-10, bubble_y+60),(bubble_x+24, bubble_y+42)])
-		pygame.draw.line(screen, DARK_GRAY, (bubble_x+10, bubble_y+42), (bubble_x-10, bubble_y+60), 2)
-		draw_text(screen, line, font, DARK_GRAY, bubble_x+12, bubble_y+8)
-		if show_prompt: draw_text(screen, "SPACE to continue...", font, GRAY, bubble_x+12, bubble_y+32)
-
-		for i, card in enumerate(game.shop_cards):
-			if card:
-				cx, cy = 150+i*150, 300
-				draw_text(screen, "Cost: 50g", font, GOLD, cx+25, cy-25)
-				draw_card(screen, card, cx, cy, (cx <= mx <= cx+120 and cy <= my <= cy+160))
-		if game.shop_passive:
-			draw_item_box(screen, game.shop_passive.name, game.shop_passive.description,
-						  game.shop_passive.cost, 650, 300, 340, 80, 650 <= mx <= 990 and 300 <= my <= 380)
-
-		pygame.draw.rect(screen, BLUE if 400 <= mx <= 600 and 500 <= my <= 545 else DARK_GRAY, (400,500,200,45), border_radius=5)
-		draw_text(screen, f"Refresh Shop ({game.shop_refresh_cost}g)", font, WHITE, 500, 522, center=True)
-		purge_color = GRAY if game.purge_used else (ORANGE if 400 <= mx <= 600 and 555 <= my <= 600 else DARK_GRAY)
-		pygame.draw.rect(screen, purge_color, (400,555,200,45), border_radius=5)
-		draw_text(screen, "PURGE CARDS" if not game.purge_used else "PURGE USED", font, WHITE, 500, 577, center=True)
-		pygame.draw.rect(screen, RED if 400 <= mx <= 600 and 610 <= my <= 655 else DARK_GRAY, (400,610,200,45), border_radius=5)
-		draw_text(screen, "LEAVE SHOP", font, WHITE, 500, 632, center=True)
-		draw_passives(screen, game, mx, my)
-
-	# ===================== SHOP PURGE =====================
-	elif game.mode == "SHOP_PURGE":
-		draw_text(screen, "PURGE CARDS", large_font, ORANGE, WIDTH//2, 100, center=True)
-		draw_text(screen, f"Gold: {game.gold}", font, GOLD, WIDTH//2, 145, center=True)
-		draw_text(screen, "Sell any of these 3 cards. This offer is one-time only.", font, GRAY, WIDTH//2, 230, center=True)
-		for i, card in enumerate(game.purge_cards):
-			if card:
-				cx = 200 + i*220; cy = 280
-				is_hover = cx <= mx <= cx+120 and cy <= my <= cy+160
-				draw_card(screen, card, cx, cy, is_hover)
-				sell_price = 75 if card.upgraded else 25
-				draw_text(screen, f"Sell: +{sell_price}g", font, GOLD, cx+60, cy+170, center=True)
+			# --- RIGHT SIDE: passives or bonus cards ---
+			passive_x = WIDTH//2 + 20
+			passive_w = WIDTH//2 - 40
+			if game.no_passives_available:
+				draw_text(screen, "ALL PASSIVES OWNED — BONUS CARD:", font, GOLD, passive_x + passive_w//2, 70, center=True)
 			else:
-				cx = 200 + i*220
-				draw_text(screen, "SOLD", large_font, GRAY, cx+60, 360, center=True)
-		done_hover = WIDTH//2-100 <= mx <= WIDTH//2+100 and HEIGHT-70 <= my <= HEIGHT-30
-		pygame.draw.rect(screen, GREEN if done_hover else DARK_GRAY, (WIDTH//2-100, HEIGHT-70, 200, 40), border_radius=5)
-		draw_text(screen, "DONE", font, BLACK, WIDTH//2, HEIGHT-50, center=True)
+				draw_text(screen, "CHOOSE 1 PASSIVE:", font, GOLD, passive_x + passive_w//2, 70, center=True)
+			if not game.reward_passive_picked:
+				if game.no_passives_available:
+					bonus_xs = [passive_x, passive_x + 145, passive_x + 290]
+					for i, card in enumerate(game.reward_choices_bonus):
+						cx = bonus_xs[i]
+						is_hov = cx <= mx <= cx+120 and card_y <= my <= card_y+160
+						draw_card(screen, card, cx, card_y, is_hov)
+				else:
+					for i, passive in enumerate(game.elite_passive_choices):
+						py = 90 + i * 90
+						is_hov = passive_x <= mx <= passive_x + passive_w and py <= my <= py + 75
+						draw_item_box(screen, passive.name, passive.description, 0, passive_x, py, passive_w, 75, is_hov, show_cost=False)
+			else:
+				pygame.draw.rect(screen, (20, 80, 20), (passive_x, 85, passive_w, 220), border_radius=10)
+				pygame.draw.rect(screen, GREEN, (passive_x, 85, passive_w, 220), 2, border_radius=10)
+				if "icon_check" in game.images:
+					chk = pygame.transform.smoothscale(game.images["icon_check"], (30, 30))
+					screen.blit(chk, chk.get_rect(center=(passive_x + passive_w//2 - 30, 190)))
+				draw_text(screen, " DONE", large_font, GREEN, passive_x + passive_w//2, 190, center=True)
 
-	# ===================== CAMPFIRE =====================
-	elif game.mode == "CAMPFIRE":
-		draw_text(screen, "CAMPFIRE", large_font, GOLD, WIDTH//2, 100, center=True)
-		pygame.draw.rect(screen, GREEN,  (200,300,150,100), border_radius=10)
-		draw_text(screen, "REST",  large_font, BLACK, 275, 340, center=True)
-		pygame.draw.rect(screen, BLUE,   (425,300,150,100), border_radius=10)
-		draw_text(screen, "SMITH", large_font, BLACK, 500, 340, center=True)
-		pygame.draw.rect(screen, PURPLE, (650,300,150,100), border_radius=10)
-		draw_text(screen, "COPY",  large_font, WHITE, 725, 340, center=True)
+			# --- Bottom buttons: CONTINUE (when both picked) + SKIP ---
+			both_picked = game.reward_card_picked and game.reward_passive_picked
+			cont_hover = WIDTH//2-220 <= mx <= WIDTH//2-20 and HEIGHT-60 <= my <= HEIGHT-20
+			cont_color = (GREEN if cont_hover else (50, 180, 50)) if both_picked else DARK_GRAY
+			pygame.draw.rect(screen, cont_color, (WIDTH//2-220, HEIGHT-60, 200, 40), border_radius=5)
+			draw_text(screen, "CONTINUE" if both_picked else "Pick first", font, WHITE if both_picked else GRAY, WIDTH//2-120, HEIGHT-40, center=True)
+			skip_both_hov = WIDTH//2+20 <= mx <= WIDTH//2+220 and HEIGHT-60 <= my <= HEIGHT-20
+			pygame.draw.rect(screen, GRAY if skip_both_hov else DARK_GRAY, (WIDTH//2+20, HEIGHT-60, 200, 40), border_radius=5)
+			draw_text(screen, "SKIP", font, WHITE, WIDTH//2+120, HEIGHT-40, center=True)
 
-	elif game.mode == "CAMPFIRE_SMITH":
-		draw_text(screen, "CHOOSE A CARD TO UPGRADE", large_font, GOLD, WIDTH//2, 50, center=True)
-		preview_card = None
-		for i, card in enumerate(game.master_deck):
-			if not card.upgraded:
+		# ===================== SHOP =====================
+		elif game.mode == "SHOP":
+			draw_text(screen, f"SHOP - Gold: {game.gold}", large_font, GOLD, WIDTH//2, 55, center=True)
+			pygame.draw.circle(screen, (210,180,140), (80, 200), 28)
+			pygame.draw.rect(screen, (120,60,20), (52,228,56,70), border_radius=6)
+			pygame.draw.rect(screen, (80,40,10), (44,195,72,18), border_radius=4)
+			pygame.draw.rect(screen, (80,40,10), (54,160,52,40), border_radius=4)
+			draw_text(screen, "~", font, (210,180,140), 80, 248, center=True)
+
+			if game.shopkeeper_index < len(game.shopkeeper_intro):
+				line = game.shopkeeper_intro[game.shopkeeper_index]
+				show_prompt = game.shopkeeper_index < len(game.shopkeeper_intro) - 1
+			else:
+				line = game.shopkeeper_tip; show_prompt = False
+			bubble_w = min(max(font.size(line)[0]+24, 200), WIDTH-140)
+			bubble_x, bubble_y = 118, 160
+			pygame.draw.rect(screen, WHITE, (bubble_x, bubble_y, bubble_w, 54), border_radius=8)
+			pygame.draw.rect(screen, DARK_GRAY, (bubble_x, bubble_y, bubble_w, 54), 2, border_radius=8)
+			pygame.draw.polygon(screen, WHITE, [(bubble_x+10, bubble_y+42),(bubble_x-10, bubble_y+60),(bubble_x+24, bubble_y+42)])
+			pygame.draw.line(screen, DARK_GRAY, (bubble_x+10, bubble_y+42), (bubble_x-10, bubble_y+60), 2)
+			draw_text(screen, line, font, DARK_GRAY, bubble_x+12, bubble_y+8)
+			if show_prompt: draw_text(screen, "SPACE to continue...", font, GRAY, bubble_x+12, bubble_y+32)
+
+			for i, card in enumerate(game.shop_cards):
+				if card:
+					cx, cy = 150+i*150, 300
+					draw_text(screen, "Cost: 50g", font, GOLD, cx+25, cy-25)
+					draw_card(screen, card, cx, cy, (cx <= mx <= cx+120 and cy <= my <= cy+160))
+			if game.shop_passive:
+				draw_item_box(screen, game.shop_passive.name, game.shop_passive.description,
+							  game.shop_passive.cost, 650, 300, 340, 80, 650 <= mx <= 990 and 300 <= my <= 380)
+
+			pygame.draw.rect(screen, BLUE if 400 <= mx <= 600 and 500 <= my <= 545 else DARK_GRAY, (400,500,200,45), border_radius=5)
+			draw_text(screen, f"Refresh Shop ({game.shop_refresh_cost}g)", font, WHITE, 500, 522, center=True)
+			purge_color = GRAY if game.purge_used else (ORANGE if 400 <= mx <= 600 and 555 <= my <= 600 else DARK_GRAY)
+			pygame.draw.rect(screen, purge_color, (400,555,200,45), border_radius=5)
+			draw_text(screen, "PURGE CARDS" if not game.purge_used else "PURGE USED", font, WHITE, 500, 577, center=True)
+			pygame.draw.rect(screen, RED if 400 <= mx <= 600 and 610 <= my <= 655 else DARK_GRAY, (400,610,200,45), border_radius=5)
+			draw_text(screen, "LEAVE SHOP", font, WHITE, 500, 632, center=True)
+			draw_passives(screen, game, mx, my)
+
+		# ===================== SHOP PURGE =====================
+		elif game.mode == "SHOP_PURGE":
+			draw_text(screen, "PURGE CARDS", large_font, ORANGE, WIDTH//2, 100, center=True)
+			draw_text(screen, f"Gold: {game.gold}", font, GOLD, WIDTH//2, 145, center=True)
+			draw_text(screen, "Sell any of these 3 cards. This offer is one-time only.", font, GRAY, WIDTH//2, 230, center=True)
+			for i, card in enumerate(game.purge_cards):
+				if card:
+					cx = 200 + i*220; cy = 280
+					is_hover = cx <= mx <= cx+120 and cy <= my <= cy+160
+					draw_card(screen, card, cx, cy, is_hover)
+					sell_price = 75 if card.upgraded else 25
+					draw_text(screen, f"Sell: +{sell_price}g", font, GOLD, cx+60, cy+170, center=True)
+				else:
+					cx = 200 + i*220
+					draw_text(screen, "SOLD", large_font, GRAY, cx+60, 360, center=True)
+			done_hover = WIDTH//2-100 <= mx <= WIDTH//2+100 and HEIGHT-70 <= my <= HEIGHT-30
+			pygame.draw.rect(screen, GREEN if done_hover else DARK_GRAY, (WIDTH//2-100, HEIGHT-70, 200, 40), border_radius=5)
+			draw_text(screen, "DONE", font, BLACK, WIDTH//2, HEIGHT-50, center=True)
+
+		# ===================== CAMPFIRE =====================
+		elif game.mode == "CAMPFIRE":
+			draw_text(screen, "CAMPFIRE", large_font, GOLD, WIDTH//2, 100, center=True)
+			pygame.draw.rect(screen, GREEN,  (200,300,150,100), border_radius=10)
+			draw_text(screen, "REST",  large_font, BLACK, 275, 340, center=True)
+			pygame.draw.rect(screen, BLUE,   (425,300,150,100), border_radius=10)
+			draw_text(screen, "SMITH", large_font, BLACK, 500, 340, center=True)
+			pygame.draw.rect(screen, PURPLE, (650,300,150,100), border_radius=10)
+			draw_text(screen, "COPY",  large_font, WHITE, 725, 340, center=True)
+
+		elif game.mode == "CAMPFIRE_SMITH":
+			draw_text(screen, "CHOOSE A CARD TO UPGRADE", large_font, GOLD, WIDTH//2, 50, center=True)
+			preview_card = None
+			for i, card in enumerate(game.master_deck):
+				if not card.upgraded:
+					cx, cy = 20 + (i%6)*130, 150 + (i//6)*170
+					is_hover = cx <= mx <= cx+120 and cy <= my <= cy+160
+					draw_card(screen, card, cx, cy, is_hover)
+					if is_hover: preview_card = card.clone(); preview_card.upgrade()
+			if preview_card:
+				pygame.draw.rect(screen, DARK_GRAY, (WIDTH-220, 150, 200, 300), border_radius=10)
+				draw_text(screen, "UPGRADE PREVIEW", font, GOLD, WIDTH-120, 170, center=True)
+				draw_card(screen, preview_card, WIDTH-180, 210, True)
+
+		elif game.mode == "CAMPFIRE_COPY":
+			draw_text(screen, "CHOOSE A CARD TO DUPLICATE", large_font, PURPLE, WIDTH//2, 50, center=True)
+			for i, card in enumerate(game.master_deck):
 				cx, cy = 20 + (i%6)*130, 150 + (i//6)*170
-				is_hover = cx <= mx <= cx+120 and cy <= my <= cy+160
-				draw_card(screen, card, cx, cy, is_hover)
-				if is_hover: preview_card = card.clone(); preview_card.upgrade()
-		if preview_card:
-			pygame.draw.rect(screen, DARK_GRAY, (WIDTH-220, 150, 200, 300), border_radius=10)
-			draw_text(screen, "UPGRADE PREVIEW", font, GOLD, WIDTH-120, 170, center=True)
-			draw_card(screen, preview_card, WIDTH-180, 210, True)
+				draw_card(screen, card, cx, cy, cx <= mx <= cx+120 and cy <= my <= cy+160)
 
-	elif game.mode == "CAMPFIRE_COPY":
-		draw_text(screen, "CHOOSE A CARD TO DUPLICATE", large_font, PURPLE, WIDTH//2, 50, center=True)
-		for i, card in enumerate(game.master_deck):
-			cx, cy = 20 + (i%6)*130, 150 + (i//6)*170
-			draw_card(screen, card, cx, cy, cx <= mx <= cx+120 and cy <= my <= cy+160)
+		# ===================== REWARD =====================
+		# ===================== GAME OVER / WIN =====================
+		elif game.mode in ["GAMEOVER", "WIN"]:
+			msg = "GAME OVER" if game.mode == "GAMEOVER" else "YOU WIN!"
+			draw_text(screen, msg, large_font, RED if game.mode == "GAMEOVER" else GREEN, WIDTH//2, HEIGHT//2, center=True)
+			draw_text(screen, "Click to restart", font, WHITE, WIDTH//2, HEIGHT//2+50, center=True)
 
-	# ===================== REWARD =====================
-	# ===================== GAME OVER / WIN =====================
-	elif game.mode in ["GAMEOVER", "WIN"]:
-		msg = "GAME OVER" if game.mode == "GAMEOVER" else "YOU WIN!"
-		draw_text(screen, msg, large_font, RED if game.mode == "GAMEOVER" else GREEN, WIDTH//2, HEIGHT//2, center=True)
-		draw_text(screen, "Click to restart", font, WHITE, WIDTH//2, HEIGHT//2+50, center=True)
+		# ===================== DECK VIEWER =====================
+		elif game.mode == "DECK_VIEWER":
+			screen.fill((20, 20, 30))
+			from_map = game.deck_viewer_prev_mode == "MAP"
+			if from_map:
+				tabs = [("DRAW", "FULL DECK", 20)]
+			else:
+				tabs = [("DRAW","DRAW",20),("DISCARD","DISCARD",150),("EXHAUST","EXHAUST",300)]
+			for tab_id, tab_label, tx in tabs:
+				active = game.deck_viewer_tab == tab_id
+				pygame.draw.rect(screen, BLUE if active else DARK_GRAY, (tx, 20, 120, 35), border_radius=5)
+				draw_text(screen, tab_label, font, WHITE, tx+60, 37, center=True)
+			pygame.draw.rect(screen, RED if WIDTH-130 <= mx <= WIDTH-20 and 20 <= my <= 55 else DARK_GRAY, (WIDTH-130, 20, 110, 35), border_radius=5)
+			draw_text(screen, "BACK", font, WHITE, WIDTH-75, 37, center=True)
+			if from_map:
+				draw_text(screen, f"Total cards in deck: {len(game.master_deck)}", font, GRAY, WIDTH//2, 70, center=True)
+				pile = game.master_deck
+			else:
+				draw_text(screen, f"Draw: {len(game.draw_pile)}  Discard: {len(game.discard_pile)}  Exhaust: {len(game.exhaust_pile)}  Hand: {len(game.hand)}", font, GRAY, WIDTH//2, 70, center=True)
+				if game.deck_viewer_tab == "DRAW":    pile = game.draw_pile
+				elif game.deck_viewer_tab == "DISCARD": pile = game.discard_pile
+				else: pile = game.exhaust_pile
+			if not pile:
+				draw_text(screen, "(empty)", large_font, GRAY, WIDTH//2, HEIGHT//2, center=True)
+			else:
+				cols_per_row = 7
+				for i, card in enumerate(pile):
+					cx = 20 + (i % cols_per_row) * 130
+					cy = 100 + (i // cols_per_row) * 170
+					if cy + 160 < HEIGHT:
+						draw_card(screen, card, cx, cy, False)
 
-	# ===================== DECK VIEWER =====================
-	elif game.mode == "DECK_VIEWER":
-		screen.fill((20, 20, 30))
-		from_map = game.deck_viewer_prev_mode == "MAP"
-		if from_map:
-			tabs = [("DRAW", "FULL DECK", 20)]
-		else:
-			tabs = [("DRAW","DRAW",20),("DISCARD","DISCARD",150),("EXHAUST","EXHAUST",300)]
-		for tab_id, tab_label, tx in tabs:
-			active = game.deck_viewer_tab == tab_id
-			pygame.draw.rect(screen, BLUE if active else DARK_GRAY, (tx, 20, 120, 35), border_radius=5)
-			draw_text(screen, tab_label, font, WHITE, tx+60, 37, center=True)
-		pygame.draw.rect(screen, RED if WIDTH-130 <= mx <= WIDTH-20 and 20 <= my <= 55 else DARK_GRAY, (WIDTH-130, 20, 110, 35), border_radius=5)
-		draw_text(screen, "BACK", font, WHITE, WIDTH-75, 37, center=True)
-		if from_map:
-			draw_text(screen, f"Total cards in deck: {len(game.master_deck)}", font, GRAY, WIDTH//2, 70, center=True)
-			pile = game.master_deck
-		else:
-			draw_text(screen, f"Draw: {len(game.draw_pile)}  Discard: {len(game.discard_pile)}  Exhaust: {len(game.exhaust_pile)}  Hand: {len(game.hand)}", font, GRAY, WIDTH//2, 70, center=True)
-			if game.deck_viewer_tab == "DRAW":    pile = game.draw_pile
-			elif game.deck_viewer_tab == "DISCARD": pile = game.discard_pile
-			else: pile = game.exhaust_pile
-		if not pile:
-			draw_text(screen, "(empty)", large_font, GRAY, WIDTH//2, HEIGHT//2, center=True)
-		else:
-			cols_per_row = 7
-			for i, card in enumerate(pile):
-				cx = 20 + (i % cols_per_row) * 130
-				cy = 100 + (i // cols_per_row) * 170
-				if cy + 160 < HEIGHT:
-					draw_card(screen, card, cx, cy, False)
+		# ===================== PAUSE =====================
+		if game.paused:
+			overlay = pygame.Surface((WIDTH, HEIGHT)); overlay.set_alpha(180); overlay.fill(BLACK); screen.blit(overlay, (0,0))
+			draw_text(screen, "PAUSED", pygame.font.Font(None, 63), WHITE, WIDTH//2, HEIGHT//3, center=True)
+			rh = WIDTH//2-100 <= mx <= WIDTH//2+100 and HEIGHT//2-30 <= my <= HEIGHT//2+20
+			pygame.draw.rect(screen, BLUE if rh else DARK_GRAY, (WIDTH//2-100, HEIGHT//2-30, 200, 50), border_radius=5)
+			draw_text(screen, "Resume", large_font, WHITE, WIDTH//2, HEIGHT//2-5, center=True)
+			qh = WIDTH//2-100 <= mx <= WIDTH//2+100 and HEIGHT//2+40 <= my <= HEIGHT//2+90
+			pygame.draw.rect(screen, RED if qh else DARK_GRAY, (WIDTH//2-100, HEIGHT//2+40, 200, 50), border_radius=5)
+			draw_text(screen, "Quit to Menu", large_font, WHITE, WIDTH//2, HEIGHT//2+65, center=True)
 
-	# ===================== PAUSE =====================
-	if game.paused:
-		overlay = pygame.Surface((WIDTH, HEIGHT)); overlay.set_alpha(180); overlay.fill(BLACK); screen.blit(overlay, (0,0))
-		draw_text(screen, "PAUSED", pygame.font.SysFont("Arial", 50, bold=True), WHITE, WIDTH//2, HEIGHT//3, center=True)
-		rh = WIDTH//2-100 <= mx <= WIDTH//2+100 and HEIGHT//2-30 <= my <= HEIGHT//2+20
-		pygame.draw.rect(screen, BLUE if rh else DARK_GRAY, (WIDTH//2-100, HEIGHT//2-30, 200, 50), border_radius=5)
-		draw_text(screen, "Resume", large_font, WHITE, WIDTH//2, HEIGHT//2-5, center=True)
-		qh = WIDTH//2-100 <= mx <= WIDTH//2+100 and HEIGHT//2+40 <= my <= HEIGHT//2+90
-		pygame.draw.rect(screen, RED if qh else DARK_GRAY, (WIDTH//2-100, HEIGHT//2+40, 200, 50), border_radius=5)
-		draw_text(screen, "Quit to Menu", large_font, WHITE, WIDTH//2, HEIGHT//2+65, center=True)
+		pygame.display.flip()
+		await asyncio.sleep(0)
+		clock.tick(FPS)
 
-	pygame.display.flip()
-	clock.tick(FPS)
+	pygame.quit()
 
-pygame.quit()
-sys.exit()
+asyncio.run(main())
