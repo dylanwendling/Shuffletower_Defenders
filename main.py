@@ -292,7 +292,7 @@ class GameState:
 					img = pygame.image.load(path).convert_alpha()
 					self.images[key] = img
 				except pygame.error:
-					pass  # file exists but failed to load — icon will be skipped
+					pass  # file exists but failed to load icon will be skipped
 
 		self.tutorial_messages = [
 			"NARRATOR: Welcome, adventurer! I'll be your guide. (Press SPACE to continue)",
@@ -300,11 +300,11 @@ class GameState:
 			"NARRATOR: Drag cards from your hand onto green grass to place towers. Walls go ON the path.",
 			"NARRATOR: Cards cost Energy (bottom left). You start with 3 Energy per turn.",
 			"NARRATOR: Enemies vary! Normal (Brown), Swarms (Green), Tanks (Gray)...",
-			"NARRATOR: ...Flyers (Pink) ignore walls! Watch for pale green HEALERS — they restore nearby enemies!",
-			"NARRATOR: SHIELDED enemies (blue ring) reduce all damage. Use Sniper Towers — they pierce armor!",
+			"NARRATOR: ...Flyers (Pink) ignore walls! Watch for pale green HEALERS they restore nearby enemies!",
+			"NARRATOR: SHIELDED enemies (blue ring) reduce all damage. Use Sniper Towers they pierce armor!",
 			"NARRATOR: SPLITTERS (orange) split into 2 Swarms when killed. Chain Lightning clears groups fast!",
 			"NARRATOR: Frost Towers (Cyan) slow enemies by 50%. Pair them with Cannons for big damage!",
-			"NARRATOR: Poison Towers (Green) infect a target — dealing damage over time. Watch for the green glow!",
+			"NARRATOR: Poison Towers (Green) infect a target dealing damage over time. Watch for the green glow!",
 			"NARRATOR: Sticky Towers cast slowly, but launch a net that slows every enemy in a radius for 6 seconds!",
 			"NARRATOR: Combine Sticky + Poison to web a group, then melt them with toxins. Deadly combo!",
 			"NARRATOR: Click 'Draw / Discard' to view your deck anytime during planning.",
@@ -316,9 +316,9 @@ class GameState:
 			"SHOPKEEPER: Ah, a customer! Welcome to my shop! (Press SPACE to continue)",
 			"SHOPKEEPER: Cards cost 50 gold each. Click one to buy it and add it to your deck.",
 			"SHOPKEEPER: That passive ability on the right? Permanent bonus for the whole run. Worth it!",
-			"SHOPKEEPER: You can PURGE up to 3 cards from your deck — once per visit. Thin it to win!",
+			"SHOPKEEPER: You can PURGE up to 3 cards from your deck once per visit. Thin it to win!",
 			"SHOPKEEPER: Pay gold to refresh my stock. New cards, new possibilities!",
-			"SHOPKEEPER: Now then — browse at your leisure. I'll be right here.",
+			"SHOPKEEPER: Now browse at your leisure. I'll be right here.",
 		]
 		self.shopkeeper_tips = [
 			"SHOPKEEPER: Frost Towers pair beautifully with Cannons. Just saying.",
@@ -333,7 +333,7 @@ class GameState:
 			"SHOPKEEPER: Chain Lightning loves packed groups. Let them cluster, then strike.",
 			"SHOPKEEPER: Overcharge is best saved for your most expensive card. Plan ahead!",
 			"SHOPKEEPER: In Endless mode, the bosses get more exotic each loop. You've been warned.",
-			"SHOPKEEPER: Twin Tactics passive? Place the same towers side by side — power in numbers!",
+			"SHOPKEEPER: Twin Tactics passive? Place the same towers side by side power in numbers!",
 			"SHOPKEEPER: Curses are tempting... but two at once is a gamble even I wouldn't take.",
 			"SHOPKEEPER: Poison Tower + Sticky Tower is a wicked combo. Web 'em, then watch 'em melt.",
 			"SHOPKEEPER: Sticky Tower fires slowly, but that net lasts 6 whole seconds. Patience pays!",
@@ -746,7 +746,7 @@ class GameState:
 								other.hp = min(other.max_hp, other.hp + 8)
 					healer.heal_cooldown = 120
 
-		# Tick sticky nets — slow any enemy standing in one
+		# Tick sticky nets slow any enemy standing in one
 		for net in self.sticky_nets[:]:
 			net[3] -= 1
 			if net[3] <= 0:
@@ -1435,7 +1435,7 @@ async def main():
 					bw = 3 if (is_available or is_current) else 2
 					pygame.draw.circle(vsurf, border_col, (node.x, node.y), NODE_R, bw)
 
-					# PNG icon — centered in circle
+					# PNG icon centered in circle
 					if icon in game.images:
 						icon_img = pygame.transform.smoothscale(game.images[icon], (40, 40))
 						ir = icon_img.get_rect(center=(node.x, node.y))
